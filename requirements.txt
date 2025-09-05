@@ -1,0 +1,6 @@
+aiogram==3.22.0
+python-dotenv==1.1.1
+aiofiles==24.1.0
+Kurigram==2.2.9
+TgCrypto
+aiohttp==3.12.15
