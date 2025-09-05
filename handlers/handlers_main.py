@@ -1,6 +1,6 @@
 # handlers/handlers_main.py
 """
-Модуль основных хендлеров для главного меню Telegram-бота (система таргетов).
+Модуль основных хендлеров для главного меню Telegram-бота (система таргетов) - единое сообщение.
 
 Этот модуль содержит функции для:
 - Обработки команды /start.
@@ -23,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 
 # --- Внутренние модули ---
 from services.config import get_valid_config, save_config, format_config_summary, get_target_display_local
-from services.menu import update_menu, config_action_keyboard
+from services.menu import update_menu, config_action_keyboard, send_main_menu, safe_edit_menu
 from services.balance import refresh_balance
 from handlers.wizard_states import ConfigWizard
 
@@ -40,7 +40,7 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
     async def command_status_handler(message: Message, state: FSMContext) -> None:
         """
         Обрабатывает команду /start от пользователя.
-        Очищает все состояния FSM, обновляет баланс и отображает главное меню с актуальной информацией.
+        Очищает все состояния FSM, обновляет баланс и отправляет главное меню.
         """
         # Простая проверка авторизации
         if message.from_user.id != user_id:
@@ -49,13 +49,15 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
 
         await state.clear()
         await refresh_balance()
-        await update_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
+
+        # Отправляем главное меню (только при /start)
+        await send_main_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id)
 
     @dp.callback_query(F.data == "main_menu")
     async def start_callback(call: CallbackQuery, state: FSMContext) -> None:
         """
         Обрабатывает нажатие на кнопку "Меню" в интерфейсе бота.
-        Очищает все состояния FSM пользователя, обновляет баланс и отображает главное меню с актуальными данными.
+        Очищает все состояния FSM пользователя, обновляет баланс и показывает главное меню в том же сообщении.
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
@@ -65,6 +67,8 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         await state.clear()
         await call.answer()
         await refresh_balance()
+
+        # Обновляем меню в том же сообщении
         await update_menu(
             bot=call.bot,
             chat_id=call.message.chat.id,
@@ -75,7 +79,7 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
     @dp.callback_query(F.data == "recipient_menu")
     async def recipient_menu_callback(call: CallbackQuery) -> None:
         """
-        Открывает меню управления получателем подарков.
+        Открывает меню управления получателем подарков в том же сообщении.
         Показывает текущего получателя и предлагает его изменить.
         """
         # Простая проверка авторизации
@@ -99,26 +103,37 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
                 f"Текущий получатель: {target_display}\n\n"
                 "👉 Нажмите <b>✏️ Изменить</b>, чтобы указать нового получателя подарков.")
 
-        await call.message.edit_text(text, reply_markup=kb)
+        # Редактируем текущее сообщение
+        await safe_edit_menu(call.message, text, kb)
         await call.answer()
 
     @dp.callback_query(F.data == "change_recipient")
     async def change_recipient_callback(call: CallbackQuery, state: FSMContext) -> None:
         """
         Запускает процесс изменения получателя подарков через FSM.
+        Отправляет инструкции в том же сообщении.
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
-        message_text = ("📥 Введите <b>нового получателя</b> подарков:\n\n"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        message_text = ("📥 <b>Изменение получателя подарков</b>\n\n"
+                        "Введите <b>нового получателя</b>:\n\n"
                         f"➤ <b>ID пользователя</b> (например ваш: <code>{call.from_user.id}</code>)\n"
                         "➤ <b>username канала</b> (например: <code>@pepeksey</code>)\n\n"
                         "🔎 <b>Узнать ID пользователя</b> можно тут: @userinfobot\n\n"
                         "⚠️ Чтобы отправить подарок на другой аккаунт, между аккаунтами должна быть переписка.\n\n"
                         "/cancel — отмена")
-        await call.message.answer(message_text)
+
+        # Редактируем текущее сообщение на инструкции
+        await safe_edit_menu(call.message, message_text, kb)
+        # Сохраняем ID сообщения для последующего редактирования
+        await state.update_data(bot_message_id=call.message.message_id)
         await state.set_state(ConfigWizard.recipient_user_id)
         await call.answer()
 
@@ -126,7 +141,7 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
     async def toggle_active_callback(call: CallbackQuery) -> None:
         """
         Переключает статус активности бота для пользователя (активен/неактивен).
-        Сохраняет изменения, обновляет интерфейс и отправляет пользователю уведомление о смене статуса.
+        Сохраняет изменения, обновляет интерфейс в том же сообщении и отправляет уведомление о смене статуса.
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
@@ -136,10 +151,14 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         config = await get_valid_config()
         config["ACTIVE"] = not config.get("ACTIVE", False)
         await save_config(config)
+
+        # Обновляем главное меню в том же сообщении
         info = format_config_summary(config, call.from_user.id)
-        await call.message.edit_text(
+        await safe_edit_menu(
+            call.message,
             info,
-            reply_markup=config_action_keyboard(config["ACTIVE"])
+            config_action_keyboard(config["ACTIVE"])
         )
+
         status_text = "включен" if config["ACTIVE"] else "выключен"
         await call.answer(f"Бот {status_text}")

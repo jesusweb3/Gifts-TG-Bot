@@ -1,6 +1,6 @@
 # handlers/sender_management.py
 """
-Модуль хендлеров для управления отправителем (упрощенная версия).
+Модуль хендлеров для управления отправителем (упрощенная версия) - единое сообщение.
 
 Этот модуль содержит функции для:
 - Отображения меню управления отправителем.
@@ -27,13 +27,12 @@ from aiogram.fsm.context import FSMContext
 
 # --- Внутренние модули ---
 from services.config import get_valid_config, save_config
-from services.menu import update_menu
-from services.balance import refresh_balance
+from services.menu import safe_edit_menu
 from services.userbot import (
     is_userbot_active, is_userbot_premium, userbot_send_self, delete_userbot_session,
     start_userbot, continue_userbot_signin, finish_userbot_signin
 )
-from handlers.wizard_states import ConfigWizard, try_cancel, safe_edit_text
+from handlers.wizard_states import ConfigWizard, try_cancel, safe_delete_message
 from utils.misc import now_str, PHONE_REGEX, API_HASH_REGEX
 
 logger = logging.getLogger(__name__)
@@ -62,6 +61,33 @@ def create_digit_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+async def edit_bot_message(message: Message, state: FSMContext, text: str,
+                           reply_markup: InlineKeyboardMarkup = None) -> bool:
+    """
+    Редактирует сообщение бота по сохраненному ID или отправляет новое.
+    """
+    data = await state.get_data()
+    bot_message_id = data.get("bot_message_id")
+
+    if bot_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=bot_message_id,
+                text=text,
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Не удалось отредактировать сообщение бота: {e}")
+
+    # Fallback: отправляем новое сообщение
+    new_msg = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+    await state.update_data(bot_message_id=new_msg.message_id)
+    return False
+
+
 @sender_router.callback_query(F.data == "sender_menu")
 async def on_sender_menu(call: CallbackQuery):
     """
@@ -82,7 +108,7 @@ async def on_sender_menu_edit(call: CallbackQuery):
 
 async def sender_menu(message: Message, user_id: int, edit: bool = False) -> None:
     """
-    Формирует и отправляет (или редактирует) меню управления отправителем для пользователя.
+    Формирует и показывает меню управления отправителем для пользователя в едином сообщении.
     """
     config = await get_valid_config()
     sender = config.get("USERBOT", {})
@@ -107,6 +133,7 @@ async def sender_menu(message: Message, user_id: int, edit: bool = False) -> Non
             sender_display += f" (@{sender_username})"
 
         text = (
+            "📤 <b>Управление отправителем</b>\n\n"
             "✅ <b>Отправитель подключён.</b>\n\n"
             f"┌ <b>Отправитель:</b> {sender_display}\n"
             f"├ <b>ID:</b> <code>{sender_user_id}</code>\n"
@@ -125,11 +152,12 @@ async def sender_menu(message: Message, user_id: int, edit: bool = False) -> Non
                 InlineKeyboardButton(text="⏳ Интервал", callback_data="sender_interval"),
             ],
             [
-                InlineKeyboardButton(text="☰ Меню", callback_data="sender_main_menu")
+                InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")
             ]
         ]
     else:
         text = (
+            "📤 <b>Управление отправителем</b>\n\n"
             "🚫 <b>Отправитель не подключён.</b>\n\n"
             "📋 <b>Подготовьте следующие данные:</b>\n\n"
             "🔸 <code>api_id</code>\n"
@@ -140,18 +168,11 @@ async def sender_menu(message: Message, user_id: int, edit: bool = False) -> Non
         )
         keyboard = [
             [InlineKeyboardButton(text="➕ Подключить отправитель", callback_data="init_sender")],
-            [InlineKeyboardButton(text="☰ Меню", callback_data="sender_main_menu")]
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ]
 
     markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-    try:
-        if edit:
-            await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
-        else:
-            await message.answer(text, reply_markup=markup, disable_web_page_preview=True)
-    except Exception as e:
-        logger.error(f"⚠️ Ошибка при обновлении меню: {e}")
+    await safe_edit_menu(message, text, markup)
 
 
 @sender_router.callback_query(F.data == "sender_interval")
@@ -170,15 +191,16 @@ async def on_sender_interval(call: CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu_edit"),
-            InlineKeyboardButton(text="☰ Меню", callback_data="sender_main_menu")
+            InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")
         ]
     ])
-    await call.message.edit_text(
-        "⏳ Выберите интервал обновления списка подарков через отправитель:\n\n"
-        "❗️ Рекомендуется использовать <b>45 секунд</b>.\n"
-        "⚠️ Частые запросы могут привести к <b>блокировке или ограничению со стороны Telegram</b>.",
-        reply_markup=kb
-    )
+
+    text = ("⏳ <b>Интервал обновления</b>\n\n"
+            "Выберите интервал обновления списка подарков через отправитель:\n\n"
+            "❗️ Рекомендуется использовать <b>45 секунд</b>.\n"
+            "⚠️ Частые запросы могут привести к <b>блокировке или ограничению со стороны Telegram</b>.")
+
+    await safe_edit_menu(call.message, text, kb)
     await call.answer()
 
 
@@ -204,7 +226,7 @@ async def edit_sender_interval(call: CallbackQuery):
     config["USERBOT"]["UPDATE_INTERVAL"] = interval
     await save_config(config)
 
-    await call.answer()
+    await call.answer(f"Интервал установлен: {interval} сек")
     await sender_menu(call.message, user_id, edit=True)
 
 
@@ -221,7 +243,7 @@ async def sender_enable_handler(call: CallbackQuery):
     config["USERBOT"]["ENABLED"] = True
     await save_config(config)
 
-    await call.answer()
+    await call.answer("Отправитель включён")
 
     text_message = (
         f"🔔 <b>Отправитель включён.</b>\n\n"
@@ -252,7 +274,7 @@ async def sender_disable_handler(call: CallbackQuery):
     config["USERBOT"]["ENABLED"] = False
     await save_config(config)
 
-    await call.answer()
+    await call.answer("Отправитель выключен")
 
     text_message = (
         f"🔕 <b>Отправитель выключен.</b>\n\n"
@@ -281,10 +303,12 @@ async def confirm_sender_delete(call: CallbackQuery):
             InlineKeyboardButton(text="❌ Нет", callback_data="sender_delete_no")
         ]
     ])
-    await call.message.edit_text(
-        "❗ Вы уверены, что хотите <b>удалить отправитель</b>?",
-        reply_markup=kb
-    )
+
+    text = ("⚠️ <b>Удаление отправителя</b>\n\n"
+            "Вы уверены, что хотите <b>удалить отправитель</b>?\n\n"
+            "Все данные авторизации будут удалены.")
+
+    await safe_edit_menu(call.message, text, kb)
     await call.answer()
 
 
@@ -294,7 +318,7 @@ async def cancel_sender_delete(call: CallbackQuery):
     Отменяет процесс удаления отправитель-сессии и возвращает в меню.
     """
     user_id = call.from_user.id
-    await call.answer("Отменено.", show_alert=True)
+    await call.answer("Отменено.")
     await sender_menu(call.message, user_id, edit=True)
 
 
@@ -307,31 +331,27 @@ async def sender_delete_handler(call: CallbackQuery):
     success = await delete_userbot_session(call, user_id)
 
     if success:
-        await call.message.answer("✅ Отправитель удалён.")
-        await sender_menu(call.message, user_id, edit=False)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        text = ("✅ <b>Отправитель удалён</b>\n\n"
+                "Отправитель успешно удалён.\n"
+                "Можете подключить новый аккаунт.")
+
+        await safe_edit_menu(call.message, text, kb)
     else:
-        await call.message.answer("🚫 Не удалось удалить отправитель. Возможно, он уже был удалён.")
-        await sender_menu(call.message, user_id, edit=False)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        text = ("🚫 <b>Ошибка удаления</b>\n\n"
+                "Не удалось удалить отправитель.\n"
+                "Возможно, он уже был удалён.")
+
+        await safe_edit_menu(call.message, text, kb)
 
     await call.answer()
-
-
-@sender_router.callback_query(F.data == "sender_main_menu")
-async def sender_main_menu_callback(call: CallbackQuery, state: FSMContext):
-    """
-    Показывает главное меню по нажатию кнопки "Меню".
-    Очищает все состояния FSM для пользователя.
-    """
-    await state.clear()
-    await call.answer()
-    await safe_edit_text(call.message, "✅ Настройка отправителя завершена.", reply_markup=None)
-    await refresh_balance()
-    await update_menu(
-        bot=call.bot,
-        chat_id=call.message.chat.id,
-        user_id=call.from_user.id,
-        message_id=call.message.message_id
-    )
 
 
 # === Процесс подключения отправителя ===
@@ -341,7 +361,18 @@ async def init_sender_handler(call: CallbackQuery, state: FSMContext):
     """
     Запускает процесс подключения новой отправитель-сессии (шаг ввода api_id).
     """
-    await call.message.answer("📥 Введите <b>api_id</b>:\n\n/cancel — отмена")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    text = ("🔑 <b>Подключение отправителя</b>\n\n"
+            "Введите <b>api_id</b>:\n\n"
+            "Получить можно на <a href=\"https://my.telegram.org\">my.telegram.org</a>\n\n"
+            "/cancel — отмена")
+
+    await safe_edit_menu(call.message, text, kb)
+    # Сохраняем ID сообщения для последующего редактирования
+    await state.update_data(bot_message_id=call.message.message_id)
     await state.set_state(ConfigWizard.userbot_api_id)
     await call.answer()
 
@@ -355,18 +386,38 @@ async def get_api_id(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        await message.answer("🚫 Поддерживается только текстовый ввод данных.\n\n/cancel — отмена")
+        await safe_delete_message(message)
         return
 
     text = message.text.strip()
 
+    # Удаляем сообщение пользователя
+    await safe_delete_message(message)
+
     if not text.isdigit() or not (10000 <= int(text) <= 9999999999):
-        await message.answer("🚫 Неверный формат. Введите корректное число.\n\n/cancel — отмена")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        error_text = ("🚫 <b>Неверный api_id</b>\n\n"
+                      "Введите корректное число от 10000 до 9999999999")
+
+        await edit_bot_message(message, state, error_text, kb)
         return
 
     value = int(text)
     await state.update_data(api_id=value)
-    await message.answer("📥 Введите <b>api_hash</b>:\n\n/cancel — отмена")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    next_text = ("🔑 <b>Подключение отправителя</b>\n\n"
+                 "Введите <b>api_hash</b>:\n\n"
+                 "32-символьная строка с my.telegram.org\n\n"
+                 "/cancel — отмена")
+
+    await edit_bot_message(message, state, next_text, kb)
     await state.set_state(ConfigWizard.userbot_api_hash)
 
 
@@ -379,18 +430,37 @@ async def get_api_hash(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        await message.answer("🚫 Поддерживается только текстовый ввод данных.\n\n/cancel — отмена")
+        await safe_delete_message(message)
         return
 
     api_hash = message.text.strip()
 
+    # Удаляем сообщение пользователя
+    await safe_delete_message(message)
+
     if not API_HASH_REGEX.fullmatch(api_hash):
-        await message.answer(
-            "🚫 Неверный формат. Убедитесь, что api_hash скопирован полностью (32 символа).\n\n/cancel — отмена")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        error_text = ("🚫 <b>Неверный api_hash</b>\n\n"
+                      "api_hash должен содержать 32 символа (0-9, a-f)")
+
+        await edit_bot_message(message, state, error_text, kb)
         return
 
     await state.update_data(api_hash=api_hash)
-    await message.answer("📥 Введите номер телефона (в формате <code>+490123456789</code>):\n\n/cancel — отмена")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    next_text = ("📱 <b>Подключение отправителя</b>\n\n"
+                 "Введите номер телефона:\n\n"
+                 "В формате <code>+490123456789</code>\n\n"
+                 "/cancel — отмена")
+
+    await edit_bot_message(message, state, next_text, kb)
     await state.set_state(ConfigWizard.userbot_phone)
 
 
@@ -403,15 +473,24 @@ async def get_phone(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        await message.answer("🚫 Поддерживается только текстовый ввод данных.\n\n/cancel — отмена")
+        await safe_delete_message(message)
         return
 
     raw_phone = message.text.strip()
     phone = raw_phone.replace(" ", "")
 
+    # Удаляем сообщение пользователя
+    await safe_delete_message(message)
+
     if not PHONE_REGEX.match(phone):
-        await message.answer(
-            "🚫 Неверный формат номера телефона.\nВведите в формате: <code>+490123456789</code>\n\n/cancel — отмена")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        error_text = ("🚫 <b>Неверный номер</b>\n\n"
+                      "Введите в формате: <code>+490123456789</code>")
+
+        await edit_bot_message(message, state, error_text, kb)
         return
 
     await state.update_data(phone=phone)
@@ -421,11 +500,17 @@ async def get_phone(message: Message, state: FSMContext):
         await sender_menu(message, message.from_user.id, edit=False)
         await state.clear()
         return
+
     await state.set_state(ConfigWizard.userbot_code)
     await state.update_data(current_code="")
-    await message.answer(
-        text=f"📥 Введите полученный код:\n\n🔢 Код:\n\n⬅️ — удалить цифру\n🆗 — подтвердить код\n\n/cancel — отмена",
-        reply_markup=create_digit_keyboard())
+
+    text = ("📱 <b>Код подтверждения</b>\n\n"
+            "Введите полученный код:\n\n"
+            "🔢 Код:\n\n"
+            "⬅️ — удалить цифру\n🆗 — подтвердить код\n\n"
+            "/cancel — отмена")
+
+    await edit_bot_message(message, state, text, create_digit_keyboard())
 
 
 @sender_router.callback_query(F.data.regexp(r"^code_\d$"), ConfigWizard.userbot_code)
@@ -438,12 +523,14 @@ async def on_code_digit(call: CallbackQuery, state: FSMContext):
     current_code = data.get("current_code", "") + digit
     await state.update_data(current_code=current_code)
     await call.answer()
-    await call.bot.edit_message_text(
-        f"📥 Введите полученный код:\n\n🔢 Код: <b>{current_code}</b>\n\n⬅️ — удалить цифру\n🆗 — подтвердить код\n\n/cancel — отмена",
-        chat_id=call.from_user.id,
-        message_id=call.message.message_id,
-        reply_markup=create_digit_keyboard()
-    )
+
+    text = (f"📱 <b>Код подтверждения</b>\n\n"
+            f"Введите полученный код:\n\n"
+            f"🔢 Код: <b>{current_code}</b>\n\n"
+            f"⬅️ — удалить цифру\n🆗 — подтвердить код\n\n"
+            f"/cancel — отмена")
+
+    await safe_edit_menu(call.message, text, create_digit_keyboard())
 
 
 @sender_router.callback_query(F.data == "code_delete", ConfigWizard.userbot_code)
@@ -455,12 +542,14 @@ async def on_code_delete(call: CallbackQuery, state: FSMContext):
     current_code = data.get("current_code", "")[:-1]
     await state.update_data(current_code=current_code)
     await call.answer()
-    await call.bot.edit_message_text(
-        f"📥 Введите полученный код:\n\n🔢 Код: <b>{current_code}</b>\n\n⬅️ — удалить цифру\n🆗 — подтвердить код\n\n/cancel — отмена",
-        chat_id=call.from_user.id,
-        message_id=call.message.message_id,
-        reply_markup=create_digit_keyboard()
-    )
+
+    text = (f"📱 <b>Код подтверждения</b>\n\n"
+            f"Введите полученный код:\n\n"
+            f"🔢 Код: <b>{current_code}</b>\n\n"
+            f"⬅️ — удалить цифру\n🆗 — подтвердить код\n\n"
+            f"/cancel — отмена")
+
+    await safe_edit_menu(call.message, text, create_digit_keyboard())
 
 
 @sender_router.callback_query(F.data == "code_enter", ConfigWizard.userbot_code)
@@ -475,32 +564,55 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
         await call.answer("🚫 Код должен быть от 4 до 6 символов. Попробуйте ещё раз.", show_alert=True)
         return
 
-    await call.bot.edit_message_text(
-        f"🔢 Введённый код: <b>{current_code}</b>",
-        chat_id=call.from_user.id,
-        message_id=call.message.message_id
-    )
+    processing_text = (f"🔄 <b>Проверка кода...</b>\n\n"
+                       f"Код: <b>{current_code}</b>\n\n"
+                       f"Проверяем код подтверждения...")
+
+    await safe_edit_menu(call.message, processing_text, None)
 
     await state.update_data(code=current_code)
     success, need_password, retry = await continue_userbot_signin(call, state)
+
     if retry:
         await state.set_state(ConfigWizard.userbot_code)
         await state.update_data(current_code="")
-        await call.message.answer(
-            text=f"📥 Введите полученный код:\n\n🔢 Код:\n\n⬅️ — удалить цифру\n🆗 — подтвердить код\n\n/cancel — отмена",
-            reply_markup=create_digit_keyboard())
+
+        retry_text = ("📱 <b>Код подтверждения</b>\n\n"
+                      "Неверный код. Попробуйте ещё раз:\n\n"
+                      "🔢 Код:\n\n"
+                      "⬅️ — удалить цифру\n🆗 — подтвердить код\n\n"
+                      "/cancel — отмена")
+
+        await safe_edit_menu(call.message, retry_text, create_digit_keyboard())
         return
+
     if not success:
-        await call.message.answer("🚫 Ошибка кода. Подключение отправителя прервано.")
-        await sender_menu(call.message, call.from_user.id, edit=False)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        error_text = ("🚫 <b>Ошибка авторизации</b>\n\n"
+                      "Не удалось авторизоваться с введённым кодом.")
+
+        await safe_edit_menu(call.message, error_text, kb)
         await state.clear()
         await call.answer()
         return
+
     if need_password:
-        await call.message.answer("📥 Введите пароль:\n\n/cancel — отмена")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
+
+        password_text = ("🔐 <b>Облачный пароль</b>\n\n"
+                         "Введите пароль от аккаунта:\n\n"
+                         "/cancel — отмена")
+
+        await safe_edit_menu(call.message, password_text, kb)
         await state.set_state(ConfigWizard.userbot_password)
     else:
         await sender_success_message(call, state)
+
     await call.answer()
 
 
@@ -513,19 +625,30 @@ async def get_password(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        await message.answer("🚫 Поддерживается только текстовый ввод данных.\n\n/cancel — отмена")
+        await safe_delete_message(message)
         return
+
+    # Удаляем сообщение пользователя с паролем
+    await safe_delete_message(message)
 
     await state.update_data(password=message.text.strip())
     success, retry = await finish_userbot_signin(message, state)
+
     if retry:
         return
+
     if success:
         await sender_success_message_text(message, state)
     else:
-        await message.answer("🚫 Неверный пароль. Подключение отправителя прервано.")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+        ])
 
-    await sender_menu(message, message.from_user.id, edit=False)
+        error_text = ("🚫 <b>Неверный пароль</b>\n\n"
+                      "Подключение отправителя прервано.")
+
+        await edit_bot_message(message, state, error_text, kb)
+
     await state.clear()
 
 
@@ -556,12 +679,20 @@ async def sender_success_message(call: CallbackQuery, state: FSMContext):
 
     success_send_message = await userbot_send_self(user_id, text_success_message)
 
-    if success_send_message:
-        await call.message.answer("✅ Отправитель успешно подключён.")
-    else:
-        await call.message.answer("✅ Отправитель успешно подключён.\n🚫 Ошибка при отправке подтверждения.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu")],
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
 
-    await sender_menu(call.message, call.from_user.id, edit=False)
+    if success_send_message:
+        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                        "Отправитель успешно подключён и готов к работе.")
+    else:
+        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                        "Отправитель успешно подключён.\n"
+                        "🚫 Ошибка при отправке подтверждения.")
+
+    await safe_edit_menu(call.message, success_text, kb)
     await state.clear()
 
 
@@ -592,11 +723,20 @@ async def sender_success_message_text(message: Message, state: FSMContext):
 
     success_send_message = await userbot_send_self(user_id, text_success_message)
 
-    if success_send_message:
-        await message.answer("✅ Отправитель успешно подключён.")
-    else:
-        await message.answer("✅ Отправитель успешно подключён.\n🚫 Ошибка при отправке подтверждения.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu")],
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
 
+    if success_send_message:
+        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                        "Отправитель успешно подключён и готов к работе.")
+    else:
+        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                        "Отправитель успешно подключён.\n"
+                        "🚫 Ошибка при отправке подтверждения.")
+
+    await edit_bot_message(message, state, success_text, kb)
     await state.clear()
 
 

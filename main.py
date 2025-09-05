@@ -1,6 +1,6 @@
 # main.py
 """
-Главный модуль приложения Telegram Gifts Bot (система таргетов).
+Главный модуль приложения Telegram Gifts Bot (система таргетов) - единое сообщение.
 
 Этот модуль содержит функции для:
 - Запуска асинхронного приложения.
@@ -38,7 +38,7 @@ from services.config import (
     MORE_LOGS,
     DEFAULT_BOT_DELAY
 )
-from services.menu import update_menu
+from services.menu import send_main_menu
 from services.balance import refresh_balance
 from services.gifts_manager import userbot_targets_updater, get_all_available_target_gifts
 from services.buy_userbot import buy_resold_gift_userbot, validate_gift_purchase
@@ -67,6 +67,7 @@ async def gift_purchase_worker(bot: Bot) -> None:
     """
     Фоновый воркер для покупки подарков по системе таргетов.
     Мониторит доступные подарки по каждому таргету и покупает те, которые соответствуют условиям.
+    Использует единое сообщение для уведомлений.
 
     :param bot: Экземпляр бота aiogram
     :return: None
@@ -87,13 +88,15 @@ async def gift_purchase_worker(bot: Bot) -> None:
                 logger.warning("Отправитель неактивен, останавливаем покупки")
                 config["ACTIVE"] = False
                 await save_config(config)
-                text = ("⚠️ Отправитель не подключен или неактивен.\n"
+
+                text = ("⚠️ <b>Отправитель неактивен</b>\n\n"
                         "📤 Настройте отправитель для продолжения работы!\n"
                         "🚦 Статус изменён на 🔴 (неактивен).")
-                bot_message = await bot.send_message(chat_id=USER_ID, text=text)
-                await update_menu(
-                    bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=bot_message.message_id
-                )
+
+                # Отправляем уведомление с главным меню
+                await bot.send_message(chat_id=USER_ID, text=text)
+                await send_main_menu(bot=bot, chat_id=USER_ID, user_id=USER_ID)
+
                 await asyncio.sleep(5)
                 continue
 
@@ -113,13 +116,15 @@ async def gift_purchase_worker(bot: Bot) -> None:
                 logger.warning("Получатель не настроен")
                 config["ACTIVE"] = False
                 await save_config(config)
-                text = ("⚠️ Получатель подарков не настроен.\n"
+
+                text = ("⚠️ <b>Получатель не настроен</b>\n\n"
                         "📥 Настройте получателя для продолжения работы!\n"
                         "🚦 Статус изменён на 🔴 (неактивен).")
-                bot_message = await bot.send_message(chat_id=USER_ID, text=text)
-                await update_menu(
-                    bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=bot_message.message_id
-                )
+
+                # Отправляем уведомление с главным меню
+                await bot.send_message(chat_id=USER_ID, text=text)
+                await send_main_menu(bot=bot, chat_id=USER_ID, user_id=USER_ID)
+
                 await asyncio.sleep(5)
                 continue
 
@@ -159,10 +164,10 @@ async def gift_purchase_worker(bot: Bot) -> None:
 
                 # Валидируем данные перед покупкой
                 if not await validate_gift_purchase(
-                    gift_data=target_gift,
-                    target_user_id=target_user_id,
-                    target_chat_id=target_chat_id,
-                    max_price=target_max_price
+                        gift_data=target_gift,
+                        target_user_id=target_user_id,
+                        target_chat_id=target_chat_id,
+                        max_price=target_max_price
                 ):
                     logger.warning(f"Валидация не прошла для подарка таргета {target_index}")
                     continue
@@ -184,7 +189,7 @@ async def gift_purchase_worker(bot: Bot) -> None:
                     sender_config = config.get("USERBOT", {})
                     sender_name = sender_config.get("FIRST_NAME", "Отправитель")
 
-                    text = (f"✅ Подарок успешно отправлен!\n\n"
+                    text = (f"✅ <b>Подарок отправлен!</b>\n\n"
                             f"🎯 Таргет: {target_gift_name}\n"
                             f"🎁 Подарок: {gift_name} за ★{gift_price:,}\n"
                             f"💰 Лимит: ★{target_max_price:,}\n"
@@ -192,10 +197,11 @@ async def gift_purchase_worker(bot: Bot) -> None:
                             f"📥 Получатель: {target_display}\n"
                             f"🔗 Ссылка: {gift_link}")
 
-                    success_message = await bot.send_message(chat_id=USER_ID, text=text)
-                    await update_menu(
-                        bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=success_message.message_id
-                    )
+                    # Отправляем уведомление об успешной покупке
+                    await bot.send_message(chat_id=USER_ID, text=text)
+                    # Отправляем обновленное главное меню
+                    await send_main_menu(bot=bot, chat_id=USER_ID, user_id=USER_ID)
+
                     await refresh_balance()
                     purchased_any = True
 
@@ -215,17 +221,19 @@ async def gift_purchase_worker(bot: Bot) -> None:
                 min_price = min(gift.get("price", 0) for gift in available_target_gifts)
 
                 if current_balance < min_price:
-                    logger.error(f"Недостаточно баланса для покупки подарков (баланс: {current_balance}, мин. цена: {min_price})")
+                    logger.error(
+                        f"Недостаточно баланса для покупки подарков (баланс: {current_balance}, мин. цена: {min_price})")
                     config["ACTIVE"] = False
                     await save_config(config)
-                    text = (f"⚠️ Недостаточно звезд для покупки подарков.\n"
+
+                    text = (f"⚠️ <b>Недостаточно звезд</b>\n\n"
                             f"💰 Баланс: {current_balance} ★\n"
                             f"💸 Требуется минимум: {min_price} ★\n"
                             f"🚦 Статус изменён на 🔴 (неактивен).")
-                    error_message = await bot.send_message(chat_id=USER_ID, text=text)
-                    await update_menu(
-                        bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=error_message.message_id
-                    )
+
+                    # Отправляем уведомление с главным меню
+                    await bot.send_message(chat_id=USER_ID, text=text)
+                    await send_main_menu(bot=bot, chat_id=USER_ID, user_id=USER_ID)
                 else:
                     if MORE_LOGS:
                         logger.info("Доступные подарки есть, но покупка не удалась (возможно, уже куплены)")
@@ -238,7 +246,7 @@ async def gift_purchase_worker(bot: Bot) -> None:
 
 async def main() -> None:
     """
-    Асинхронная точка входа в приложение (система таргетов).
+    Асинхронная точка входа в приложение (система таргетов) - единое сообщение.
 
     - Проверяет конфигурационный файл (config.json)
     - Создаёт HTTP-сессию и объект бота

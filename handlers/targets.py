@@ -1,6 +1,6 @@
 # handlers/targets.py
 """
-Модуль хендлеров для управления таргетами.
+Модуль хендлеров для управления таргетами - единое сообщение.
 
 Этот модуль содержит функции для:
 - Отображения меню управления таргетами.
@@ -24,17 +24,16 @@ from aiogram.fsm.context import FSMContext
 
 # --- Внутренние модули ---
 from services.config import get_valid_config, remove_target, update_target
-from services.menu import update_menu
-from services.balance import refresh_balance
-from handlers.wizard_states import ConfigWizard, safe_edit_text
+from services.menu import safe_edit_menu
+from handlers.wizard_states import ConfigWizard
 
 logger = logging.getLogger(__name__)
 targets_router = Router()
 
 
-async def targets_menu(message: Message, user_id: int) -> None:
+async def targets_menu(message: Message) -> None:
     """
-    Показывает пользователю главное меню управления таргетами.
+    Показывает пользователю главное меню управления таргетами в едином сообщении.
     Отображает список всех таргетов и предоставляет кнопки для их редактирования или добавления нового таргета.
     """
     config = await get_valid_config()
@@ -63,7 +62,7 @@ async def targets_menu(message: Message, user_id: int) -> None:
         keyboard.append([InlineKeyboardButton(text="🚫 Лимит таргетов (20/20)", callback_data="target_limit_reached")])
 
     # Кнопка назад
-    keyboard.append([InlineKeyboardButton(text="☰ Меню", callback_data="targets_main_menu")])
+    keyboard.append([InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")])
 
     # Формируем текст меню
     lines = []
@@ -96,18 +95,53 @@ async def targets_menu(message: Message, user_id: int) -> None:
         text_targets = f"🎯 <b>Таргетов пока нет (0/{max_targets})</b>\n\nДобавьте таргет, чтобы бот начал мониторить конкретные подарки по вашим ценовым лимитам."
 
     kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
-    await message.answer(f"{text_targets}\n\n"
-                         "👉 <b>Нажмите</b> на таргет чтобы изменить его.\n"
-                         "🎯 <b>Таргет</b> — это конкретный подарок с максимальной ценой для покупки.",
-                         reply_markup=kb)
+    await safe_edit_menu(
+        message,
+        f"{text_targets}\n\n"
+        "👉 <b>Нажмите</b> на таргет чтобы изменить его.\n"
+        "🎯 <b>Таргет</b> — это конкретный подарок с максимальной ценой для покупки.",
+        kb
+    )
 
 
 @targets_router.callback_query(F.data == "targets_menu")
 async def on_targets_menu(call: CallbackQuery):
     """
     Обрабатывает нажатие на кнопку "Таргеты" или переход к списку таргетов.
+    Проверяет настройку отправителя и получателя перед доступом к таргетам.
     """
-    await targets_menu(call.message, call.from_user.id)
+    config = await get_valid_config()
+
+    # Проверяем настройку отправителя
+    userbot = config.get("USERBOT", {})
+    sender_configured = bool(
+        userbot.get("API_ID") and
+        userbot.get("API_HASH") and
+        userbot.get("PHONE")
+    )
+
+    # Проверяем настройку получателя
+    recipient_configured = bool(
+        config.get("TARGET_USER_ID") or
+        config.get("TARGET_CHAT_ID")
+    )
+
+    # Если отправитель или получатель не настроены
+    if not sender_configured or not recipient_configured:
+        missing_items = []
+        if not sender_configured:
+            missing_items.append("Отправитель")
+        if not recipient_configured:
+            missing_items.append("Получатель")
+
+        missing_text = " и ".join(missing_items)
+        alert_text = f"⚠️ Сначала настройте: {missing_text}"
+
+        await call.answer(alert_text, show_alert=True)
+        return
+
+    # Если все настроено, показываем меню таргетов
+    await targets_menu(call.message)
     await call.answer()
 
 
@@ -154,7 +188,7 @@ def target_edit_keyboard(idx: int, enabled: bool) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="targets_menu"),
-                InlineKeyboardButton(text="☰ Меню", callback_data="targets_main_menu")
+                InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")
             ]
         ]
     )
@@ -176,9 +210,11 @@ async def on_target_edit(call: CallbackQuery, state: FSMContext):
     target = targets[idx]
     enabled = target.get('ENABLED', True)
     await state.update_data(target_index=idx)
-    await call.message.edit_text(
+
+    await safe_edit_menu(
+        call.message,
         target_text(target, idx),
-        reply_markup=target_edit_keyboard(idx, enabled)
+        target_edit_keyboard(idx, enabled)
     )
     await call.answer()
 
@@ -201,9 +237,10 @@ async def on_target_toggle(call: CallbackQuery):
 
     await update_target(config, idx, enabled=new_enabled, save=True)
 
-    await call.message.edit_text(
+    await safe_edit_menu(
+        call.message,
         target_text(target, idx),
-        reply_markup=target_edit_keyboard(idx, new_enabled)
+        target_edit_keyboard(idx, new_enabled)
     )
 
     status_text = "включён" if new_enabled else "выключен"
@@ -213,30 +250,22 @@ async def on_target_toggle(call: CallbackQuery):
 @targets_router.callback_query(F.data == "target_add")
 async def on_target_add(call: CallbackQuery, state: FSMContext):
     """
-    Запускает процесс добавления нового таргета.
+    Запускает процесс добавления нового таргета в едином сообщении.
     """
-    await call.message.answer("🆔 Введите <b>ID подарка</b> для нового таргета:\n\n"
-                              "Например: <code>6014591077976114307</code>\n\n"
-                              "/cancel — отмена")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    text = ("🆔 <b>Добавление нового таргета</b>\n\n"
+            "Введите <b>ID подарка</b>:\n\n"
+            "Например: <code>6014591077976114307</code>\n\n"
+            "/cancel — отмена")
+
+    await safe_edit_menu(call.message, text, kb)
+    # Сохраняем ID сообщения для последующего редактирования
+    await state.update_data(bot_message_id=call.message.message_id)
     await state.set_state(ConfigWizard.target_gift_id)
     await call.answer()
-
-
-@targets_router.callback_query(F.data == "targets_main_menu")
-async def targets_main_menu_callback(call: CallbackQuery, state: FSMContext):
-    """
-    Показывает главное меню по нажатию кнопки "Меню".
-    """
-    await state.clear()
-    await call.answer()
-    await safe_edit_text(call.message, "✅ Управление таргетами завершено.", reply_markup=None)
-    await refresh_balance()
-    await update_menu(
-        bot=call.bot,
-        chat_id=call.message.chat.id,
-        user_id=call.from_user.id,
-        message_id=call.message.message_id
-    )
 
 
 # === Редактирование полей таргета ===
@@ -259,10 +288,21 @@ async def edit_target_price(call: CallbackQuery, state: FSMContext):
     current_price = target.get('MAX_PRICE', 0)
 
     await state.update_data(target_index=idx)
-    await call.message.answer(f"💰 Введите новую <b>максимальную цену</b> для таргета <b>{gift_name}</b>\n\n"
-                              f"Текущая цена: ★{current_price:,}\n"
-                              f"Например: <code>15000</code>\n\n"
-                              "/cancel — отмена")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    text = (f"💰 <b>Изменение цены таргета</b>\n\n"
+            f"🎁 Таргет: {gift_name}\n"
+            f"💰 Текущая цена: ★{current_price:,}\n\n"
+            f"Введите новую <b>максимальную цену</b>:\n"
+            f"Например: <code>15000</code>\n\n"
+            "/cancel — отмена")
+
+    await safe_edit_menu(call.message, text, kb)
+    # Сохраняем ID сообщения для последующего редактирования
+    await state.update_data(bot_message_id=call.message.message_id)
     await state.set_state(ConfigWizard.edit_target_price)
     await call.answer()
 
@@ -300,10 +340,9 @@ async def on_target_delete_confirm(call: CallbackQuery):
                f"├💰 <b>Макс. цена:</b> ★{max_price:,}\n"
                f"└🆔 <b>ID:</b> <code>{gift_id}</code>")
 
-    await call.message.edit_text(
-        f"⚠️ Вы уверены, что хотите <b>удалить</b> таргет?\n\n{message}",
-        reply_markup=kb
-    )
+    text = f"⚠️ <b>Удаление таргета</b>\n\nВы уверены, что хотите удалить таргет?\n\n{message}"
+
+    await safe_edit_menu(call.message, text, kb)
     await call.answer()
 
 
@@ -325,8 +364,14 @@ async def on_target_delete_final(call: CallbackQuery):
 
     await remove_target(config, idx, save=True)
 
-    await call.message.edit_text(f"✅ Таргет <b>{gift_name}</b> удалён.", reply_markup=None)
-    await targets_menu(call.message, call.from_user.id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎯 Таргеты", callback_data="targets_menu")],
+        [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
+    ])
+
+    text = f"✅ <b>Таргет удалён!</b>\n\nТаргет <b>{gift_name}</b> успешно удалён из системы."
+
+    await safe_edit_menu(call.message, text, kb)
     await call.answer()
 
 
@@ -346,9 +391,10 @@ async def on_target_delete_cancel(call: CallbackQuery):
     target = targets[idx]
     enabled = target.get('ENABLED', True)
 
-    await call.message.edit_text(
+    await safe_edit_menu(
+        call.message,
         target_text(target, idx),
-        reply_markup=target_edit_keyboard(idx, enabled)
+        target_edit_keyboard(idx, enabled)
     )
     await call.answer("Отменено.")
 
