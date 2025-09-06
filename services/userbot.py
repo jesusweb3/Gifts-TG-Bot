@@ -6,7 +6,6 @@
 - Создания, запуска и авторизации отправитель-сессии.
 - Управления сессионным файлом и конфигурацией отправителя.
 - Получения баланса звёзд через отправитель.
-- Отправки сообщений от имени отправителя.
 
 Основные функции:
 - is_userbot_active: Проверяет, активна ли отправитель-сессия.
@@ -23,7 +22,6 @@
 import logging
 import os
 import builtins
-import random
 
 # --- Сторонние библиотеки ---
 from aiogram.types import CallbackQuery, Message
@@ -42,7 +40,10 @@ from pyrogram.errors import (
 )
 
 # --- Внутренние библиотеки ---
-from services.config import get_valid_config, save_config, DEVICE_MODELS, SYSTEM_VERSIONS, APP_VERSIONS
+from services.config import (
+    get_valid_config, save_config,
+    DEVICE_MODEL, SYSTEM_VERSION, APP_VERSION, LANG_CODE, SYSTEM_LANG_CODE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,10 @@ async def try_start_userbot_from_config(user_id: int, bot_id: int) -> bool:
     """
     Проверяет, есть ли валидная отправитель-сессия для пользователя, и запускает её.
     Сохраняет имя аккаунта в конфиг для отображения отправителя.
+
+    :param user_id: ID пользователя Telegram
+    :param bot_id: ID бота (для совместимости)
+    :return: True если сессия успешно запущена
     """
     global _userbot_client, _userbot_started, _current_user_id
 
@@ -125,8 +130,6 @@ async def try_start_userbot_from_config(user_id: int, bot_id: int) -> bool:
         api_id = userbot_data["API_ID"]
         api_hash = userbot_data["API_HASH"]
         phone_number = userbot_data["PHONE"]
-
-        logger.info(f"📤 ОТПРАВИТЕЛЬ: Найдена конфигурация отправителя для номера {phone_number}")
 
         app: Client = await create_userbot_client(session_name, api_id, api_hash, phone_number, sessions_dir)
 
@@ -226,7 +229,6 @@ async def _clear_userbot_config():
         "FIRST_NAME": None,
         "BALANCE": 0,
         "ENABLED": False,
-        "CONFIG_ID": None,
         "UPDATE_INTERVAL": 45
     }
     await save_config(config)
@@ -241,26 +243,19 @@ async def create_userbot_client(
         workdir: str,
 ) -> Client:
     """
-    Создаёт экземпляр Pyrogram Client с предустановленными параметрами для отправителя.
-    Если CONFIG_ID == None, генерирует случайный CONFIG_ID.
+    Создаёт экземпляр Pyrogram Client с фиксированными параметрами Desktop-клиента.
+
+    :param session_name: Имя сессии
+    :param api_id: API ID от my.telegram.org
+    :param api_hash: API Hash от my.telegram.org
+    :param phone: Номер телефона
+    :param workdir: Рабочая директория для сессий
+    :return: Настроенный Pyrogram Client
     """
     logger.debug(f"📤 ОТПРАВИТЕЛЬ: Создание клиента для сессии {session_name}")
 
-    config = await get_valid_config()
-    config_id = config["USERBOT"].get("CONFIG_ID")
-
-    if config_id is None:
-        config_id = random.randint(0, len(DEVICE_MODELS) - 1)
-        config["USERBOT"]["CONFIG_ID"] = config_id
-        await save_config(config)
-        logger.debug(f"📤 ОТПРАВИТЕЛЬ: Сгенерирован CONFIG_ID: {config_id}")
-
-    device_model = DEVICE_MODELS[config_id]
-    system_version = SYSTEM_VERSIONS[config_id]
-    app_version = APP_VERSIONS[config_id]
-
     logger.debug(
-        f"📤 ОТПРАВИТЕЛЬ: Параметры клиента - Устройство: {device_model}, Система: {system_version}, Приложение: {app_version}")
+        f"📤 ОТПРАВИТЕЛЬ: Параметры клиента - Устройство: {DEVICE_MODEL}, Система: {SYSTEM_VERSION}, Приложение: {APP_VERSION}")
 
     return Client(
         name=session_name,
@@ -268,11 +263,12 @@ async def create_userbot_client(
         api_hash=api_hash,
         phone_number=phone,
         workdir=workdir,
-        device_model=device_model,
-        system_version=system_version,
-        app_version=app_version,
+        device_model=DEVICE_MODEL,
+        system_version=SYSTEM_VERSION,
+        app_version=APP_VERSION,
+        lang_code=LANG_CODE,
+        system_lang_code=SYSTEM_LANG_CODE,
         sleep_threshold=30,
-        lang_code="en",
         no_updates=True,
         skip_updates=True
     )
@@ -281,10 +277,12 @@ async def create_userbot_client(
 async def start_userbot(message: Message, state) -> bool:
     """
     Инициирует подключение отправителя: отправляет код подтверждения и сохраняет состояние клиента.
+
+    :param message: Сообщение пользователя
+    :param state: FSM состояние
+    :return: True если код успешно отправлен
     """
     global _userbot_client, _current_user_id
-
-    logger.info(f"🔐 ОТПРАВИТЕЛЬ: Начало процесса авторизации для пользователя {message.from_user.id}")
 
     # Запрет интерактивного ввода
     builtins.input = lambda _: (_ for _ in ()).throw(RuntimeError())
@@ -298,15 +296,12 @@ async def start_userbot(message: Message, state) -> bool:
     api_hash = data["api_hash"]
     phone_number = data["phone"]
 
-    logger.info(f"📱 ОТПРАВИТЕЛЬ: Настройка сессии для номера {phone_number}")
-
     app: Client = await create_userbot_client(session_name, api_id, api_hash, phone_number, sessions_dir)
 
     logger.debug("📤 ОТПРАВИТЕЛЬ: Подключение к Telegram")
     await app.connect()
 
     try:
-        logger.info("📨 ОТПРАВИТЕЛЬ: Отправка кода подтверждения на номер")
         sent = await app.send_code(phone_number)
 
         # Сохраняем клиент для дальнейшего использования
@@ -356,6 +351,10 @@ async def continue_userbot_signin(call: CallbackQuery, state: FSMContext) -> tup
     """
     Продолжает авторизацию отправителя с использованием кода подтверждения.
     Сохраняет данные аккаунта в конфиг для отображения отправителя.
+
+    :param call: Callback query от пользователя
+    :param state: FSM состояние
+    :return: (success, need_password, retry)
     """
     global _userbot_client, _userbot_started, _current_user_id
 
@@ -363,8 +362,6 @@ async def continue_userbot_signin(call: CallbackQuery, state: FSMContext) -> tup
     user_id = call.from_user.id
     code = data["code"]
     attempts = data.get("code_attempts", 0)
-
-    logger.info(f"🔐 ОТПРАВИТЕЛЬ: Проверка кода подтверждения (попытка {attempts + 1})")
 
     if not _userbot_client:
         logger.error("❌ ОТПРАВИТЕЛЬ: Клиент не найден - процесс авторизации прерван")
@@ -381,8 +378,6 @@ async def continue_userbot_signin(call: CallbackQuery, state: FSMContext) -> tup
         await call.message.answer("🚫 Код не указан.")
         return False, False, False
 
-    logger.debug(f"🔐 ОТПРАВИТЕЛЬ: Попытка авторизации с кодом для номера {phone}")
-
     try:
         await _userbot_client.sign_in(
             phone_number=phone,
@@ -393,8 +388,6 @@ async def continue_userbot_signin(call: CallbackQuery, state: FSMContext) -> tup
         # Проверка авторизации через get_me()
         try:
             me = await _userbot_client.get_me()
-            logger.info(
-                f"✅ ОТПРАВИТЕЛЬ: Успешная авторизация как {me.first_name} (@{me.username or 'без username'}) ID: {me.id}")
         except Exception as get_me_error:
             logger.error(f"❌ ОТПРАВИТЕЛЬ: Сессия не авторизована после ввода кода: {get_me_error}")
             await call.message.answer("🚫 Сессия не авторизована.")
@@ -415,8 +408,8 @@ async def continue_userbot_signin(call: CallbackQuery, state: FSMContext) -> tup
         config["USERBOT"]["ENABLED"] = True
         await save_config(config)
 
-        logger.info("💾 ОТПРАВИТЕЛЬ: Данные аккаунта сохранены в конфигурацию")
-        logger.info("🟢 ОТПРАВИТЕЛЬ: Авторизация завершена успешно")
+        logger.info(
+            f"✅ ОТПРАВИТЕЛЬ: Авторизация завершена успешно как {me.first_name} (@{me.username or 'без username'}) ID: {me.id}")
 
         return True, False, False  # Успешно, пароль не требуется, не retry
 
@@ -448,13 +441,15 @@ async def finish_userbot_signin(message: Message, state) -> tuple[bool, bool]:
     """
     Завершает авторизацию отправителя после ввода пароля.
     Сохраняет данные аккаунта в конфиг для отображения отправителя.
+
+    :param message: Сообщение пользователя
+    :param state: FSM состояние
+    :return: (success, retry)
     """
     global _userbot_client, _userbot_started, _current_user_id
 
     data = await state.get_data()
     user_id = message.from_user.id
-
-    logger.info(f"🔐 ОТПРАВИТЕЛЬ: Проверка облачного пароля для пользователя {user_id}")
 
     if not _userbot_client:
         logger.error("❌ ОТПРАВИТЕЛЬ: Клиент не найден при проверке пароля")
@@ -472,16 +467,12 @@ async def finish_userbot_signin(message: Message, state) -> tuple[bool, bool]:
         await message.answer("🚫 Пароль не указан.")
         return False, False
 
-    logger.debug("🔐 ОТПРАВИТЕЛЬ: Попытка авторизации с облачным паролем")
-
     try:
         await _userbot_client.check_password(password)
 
         # Проверка авторизации через get_me()
         try:
             me = await _userbot_client.get_me()
-            logger.info(
-                f"✅ ОТПРАВИТЕЛЬ: Успешная авторизация с паролем как {me.first_name} (@{me.username or 'без username'}) ID: {me.id}")
         except Exception as get_me_error:
             logger.error(f"❌ ОТПРАВИТЕЛЬ: Сессия не авторизована даже после пароля: {get_me_error}")
             await message.answer("🚫 Сессия не авторизована даже после пароля.")
@@ -502,8 +493,8 @@ async def finish_userbot_signin(message: Message, state) -> tuple[bool, bool]:
         config["USERBOT"]["ENABLED"] = True
         await save_config(config)
 
-        logger.info("💾 ОТПРАВИТЕЛЬ: Данные аккаунта сохранены в конфигурацию")
-        logger.info("🟢 ОТПРАВИТЕЛЬ: Авторизация с паролем завершена успешно")
+        logger.info(
+            f"✅ ОТПРАВИТЕЛЬ: Авторизация завершена успешно как {me.first_name} (@{me.username or 'без username'}) ID: {me.id}")
 
         return True, False
 
@@ -528,30 +519,12 @@ async def finish_userbot_signin(message: Message, state) -> tuple[bool, bool]:
         return False, False
 
 
-async def userbot_send_self(user_id: int, text: str) -> bool:
-    """
-    Отправляет подтверждающее сообщение в «Избранное» пользователя от имени отправителя.
-    """
-    global _userbot_client
-
-    logger.debug(f"📨 ОТПРАВИТЕЛЬ: Отправка сообщения в 'Избранное' для пользователя {user_id}")
-
-    if not is_userbot_active(user_id) or _userbot_client is None:
-        logger.error("❌ ОТПРАВИТЕЛЬ: Невозможно отправить сообщение - клиент неактивен")
-        return False
-
-    try:
-        await _userbot_client.send_message("me", text, parse_mode=None)
-        logger.info("✅ ОТПРАВИТЕЛЬ: Сообщение успешно отправлено в 'Избранное'")
-        return True
-    except Exception as e:
-        logger.error(f"❌ ОТПРАВИТЕЛЬ: Ошибка при отправке сообщения в 'Избранное': {e}")
-        return False
-
-
 async def get_userbot_client(user_id: int) -> Client | None:
     """
     Возвращает объект Pyrogram Client для user_id, если он есть.
+
+    :param user_id: ID пользователя
+    :return: Pyrogram Client или None
     """
     logger.debug(f"📤 ОТПРАВИТЕЛЬ: Запрос клиента для пользователя {user_id}")
 
@@ -566,6 +539,10 @@ async def get_userbot_client(user_id: int) -> Client | None:
 async def delete_userbot_session(call: CallbackQuery, user_id: int) -> bool:
     """
     Полностью удаляет отправитель-сессию: останавливает клиента, удаляет файлы и очищает конфиг.
+
+    :param call: Callback query
+    :param user_id: ID пользователя
+    :return: True если успешно удалено
     """
     global _userbot_client, _userbot_started, _current_user_id
 
@@ -604,6 +581,8 @@ async def delete_userbot_session(call: CallbackQuery, user_id: int) -> bool:
 async def get_userbot_stars_balance() -> int:
     """
     Получает баланс звёзд через авторизованного отправителя.
+
+    :return: Баланс в звездах
     """
     global _userbot_client, _userbot_started
 

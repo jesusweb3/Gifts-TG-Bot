@@ -29,7 +29,7 @@ from aiogram.fsm.context import FSMContext
 from services.config import get_valid_config, save_config
 from services.menu import safe_edit_menu
 from services.userbot import (
-    is_userbot_active, is_userbot_premium, userbot_send_self, delete_userbot_session,
+    is_userbot_active, is_userbot_premium, delete_userbot_session,
     start_userbot, continue_userbot_signin, finish_userbot_signin
 )
 from handlers.wizard_states import ConfigWizard, try_cancel, safe_delete_message

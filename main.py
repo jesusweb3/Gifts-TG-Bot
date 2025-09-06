@@ -39,7 +39,6 @@ from services.config import (
     update_config_from_env,
     VERSION,
     PURCHASE_COOLDOWN,
-    MORE_LOGS,
     DEFAULT_BOT_DELAY
 )
 from services.menu import send_main_menu

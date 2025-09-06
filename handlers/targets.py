@@ -98,7 +98,7 @@ async def targets_menu(message: Message) -> None:
 
     kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    logger.info(f"🎯 ТАРГЕТЫ: Отображение меню - всего: {len(targets)}, активных: {enabled_count}")
+    logger.debug(f"🎯 ТАРГЕТЫ: Отображение меню - всего: {len(targets)}, активных: {enabled_count}")
 
     await safe_edit_menu(
         message,
@@ -115,7 +115,7 @@ async def on_targets_menu(call: CallbackQuery):
     Обрабатывает нажатие на кнопку "Таргеты" или переход к списку таргетов.
     Проверяет настройку отправителя и получателя перед доступом к таргетам.
     """
-    logger.info(f"🎯 ТАРГЕТЫ: Запрос меню таргетов от пользователя {call.from_user.id}")
+    logger.info(f"🎯 TARGETS: Пользователь {call.from_user.id} перешёл по кнопке \"Таргеты\"")
 
     config = await get_valid_config()
 
@@ -147,8 +147,6 @@ async def on_targets_menu(call: CallbackQuery):
         logger.warning(f"⚠️ ТАРГЕТЫ: Доступ к таргетам заблокирован - не настроены: {missing_text}")
         await call.answer(alert_text, show_alert=True)
         return
-
-    logger.info("✅ ТАРГЕТЫ: Проверки пройдены - показываем меню таргетов")
 
     # Если все настроено, показываем меню таргетов
     await targets_menu(call.message)
@@ -212,7 +210,7 @@ async def on_target_edit(call: CallbackQuery, state: FSMContext):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"✏️ ТАРГЕТЫ: Пользователь {call.from_user.id} редактирует таргет #{idx}")
+    logger.info(f"✏️ TARGETS: Пользователь {call.from_user.id} редактирует таргет #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
@@ -245,7 +243,7 @@ async def on_target_toggle(call: CallbackQuery):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"🔄 ТАРГЕТЫ: Пользователь {call.from_user.id} переключает статус таргета #{idx}")
+    logger.info(f"🔄 TARGETS: Пользователь {call.from_user.id} переключает статус таргета #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
@@ -279,7 +277,7 @@ async def on_target_add(call: CallbackQuery, state: FSMContext):
     """
     Запускает процесс добавления нового таргета в едином сообщении.
     """
-    logger.info(f"➕ ТАРГЕТЫ: Пользователь {call.from_user.id} начинает добавление нового таргета")
+    logger.info(f"➕ TARGETS: Пользователь {call.from_user.id} перешёл по кнопке \"Добавить таргет\"")
 
     # Проверяем лимит таргетов
     config = await get_valid_config()
@@ -315,7 +313,7 @@ async def edit_target_price(call: CallbackQuery, state: FSMContext):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"💰 ТАРГЕТЫ: Пользователь {call.from_user.id} редактирует цену таргета #{idx}")
+    logger.info(f"💰 TARGETS: Пользователь {call.from_user.id} редактирует цену таргета #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
@@ -360,7 +358,7 @@ async def on_target_delete_confirm(call: CallbackQuery):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"🗑️ ТАРГЕТЫ: Пользователь {call.from_user.id} запрашивает удаление таргета #{idx}")
+    logger.info(f"🗑️ TARGETS: Пользователь {call.from_user.id} запрашивает удаление таргета #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
@@ -403,7 +401,7 @@ async def on_target_delete_final(call: CallbackQuery):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"🗑️ ТАРГЕТЫ: Пользователь {call.from_user.id} подтверждает удаление таргета #{idx}")
+    logger.info(f"🗑️ TARGETS: Пользователь {call.from_user.id} подтверждает удаление таргета #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
@@ -440,7 +438,7 @@ async def on_target_delete_cancel(call: CallbackQuery):
     """
     idx = int(call.data.split("_")[-1])
 
-    logger.info(f"↩️ ТАРГЕТЫ: Пользователь {call.from_user.id} отменил удаление таргета #{idx}")
+    logger.info(f"↩️ TARGETS: Пользователь {call.from_user.id} отменил удаление таргета #{idx}")
 
     config = await get_valid_config()
     targets = config.get("TARGETS", [])

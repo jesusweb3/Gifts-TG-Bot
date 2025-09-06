@@ -204,17 +204,13 @@ async def step_target_gift_id(message: Message, state: FSMContext):
         await edit_bot_message(message, state, error_text, kb)
         return
 
-    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Gift ID валиден: {validated_gift_id}")
-
-    # Проверяем доступность подарка
+    # Проверяем доступность подарка (только базовая проверка)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
     ])
 
     check_text = "🔍 <b>Проверка подарка...</b>\n\nПроверяю доступность подарка для перепродажи..."
     await edit_bot_message(message, state, check_text, kb)
-
-    logger.info(f"🔍 ТАРГЕТ-МАСТЕР: Проверка доступности подарка ID {validated_gift_id}")
 
     availability = await check_gift_availability(message.from_user.id, validated_gift_id)
 
@@ -233,8 +229,6 @@ async def step_target_gift_id(message: Message, state: FSMContext):
     # Автоматически используем название подарка
     gift_name_found = availability.get("gift_name", "Unknown")
     total_found = availability["total_found"]
-
-    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Подарок найден - {gift_name_found}, доступно: {total_found:,} шт")
 
     await state.update_data(
         gift_id=validated_gift_id,
@@ -264,7 +258,7 @@ async def step_target_max_price(message: Message, state: FSMContext):
         return
 
     price_input = message.text.strip()
-    logger.info(f"💰 ТАРГЕТ-МАСТЕР: Пользователь {message.from_user.id} ввел цену: {price_input}")
+    logger.info(f"💰 TARGETS: Пользователь {message.from_user.id} ввел цену: {price_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -300,8 +294,6 @@ async def step_target_max_price(message: Message, state: FSMContext):
         await edit_bot_message(message, state, error_text, kb)
         return
 
-    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Цена валидна: ★{max_price:,}")
-
     data = await state.get_data()
     gift_id = data["gift_id"]
     gift_name = data["gift_name"]
@@ -325,8 +317,6 @@ async def step_target_max_price(message: Message, state: FSMContext):
         return
 
     # Создаём таргет
-    logger.info(f"➕ ТАРГЕТ-МАСТЕР: Создание таргета - {gift_name} (ID: {gift_id}, цена: ★{max_price:,})")
-
     await add_target(config, str(gift_id), gift_name, max_price, save=True)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -340,7 +330,7 @@ async def step_target_max_price(message: Message, state: FSMContext):
                     f"💰 Макс. цена: ★{max_price:,}\n\n"
                     f"Таргет добавлен в систему мониторинга.")
 
-    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Таргет успешно создан - {gift_name}")
+    logger.info(f"✅ TARGETS: Таргет успешно создан - {gift_name}")
 
     await edit_bot_message(message, state, success_text, kb)
     await state.clear()
@@ -363,7 +353,7 @@ async def step_edit_target_price(message: Message, state: FSMContext):
         return
 
     price_input = message.text.strip()
-    logger.info(f"💰 РЕДАКТИРОВАНИЕ: Пользователь {message.from_user.id} ввел новую цену: {price_input}")
+    logger.info(f"💰 TARGETS: Пользователь {message.from_user.id} ввел новую цену: {price_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -434,7 +424,7 @@ async def step_edit_target_price(message: Message, state: FSMContext):
     # Обновляем цену таргета
     await update_target(config, idx, max_price=new_price, save=True)
 
-    logger.info(f"✅ РЕДАКТИРОВАНИЕ: Цена таргета #{idx} '{gift_name}' изменена: ★{old_price:,} → ★{new_price:,}")
+    logger.info(f"✅ TARGETS: Цена таргета #{idx} '{gift_name}' изменена: ★{old_price:,} → ★{new_price:,}")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎯 Таргеты", callback_data="targets_menu")],
@@ -479,12 +469,12 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
             target_chat_id = user_input
             target_user_id = None
             target_type = "channel"
-            logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил канал: {user_input}")
+            logger.info(f"📥 TARGETS: Пользователь {message.from_user.id} установил канал: {user_input}")
         elif chat_type == "unknown":
             target_chat_id = user_input
             target_user_id = None
             target_type = "username"
-            logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил username: {user_input}")
+            logger.info(f"📥 TARGETS: Пользователь {message.from_user.id} установил username: {user_input}")
         else:
             logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неподдерживаемый тип чата '{chat_type}' для {user_input}")
 
@@ -502,7 +492,7 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
         target_chat_id = None
         target_user_id = int(user_input)
         target_type = "user_id"
-        logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил User ID: {target_user_id}")
+        logger.info(f"📥 TARGETS: Пользователь {message.from_user.id} установил User ID: {target_user_id}")
     else:
         logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неверный формат получателя: {user_input}")
 
