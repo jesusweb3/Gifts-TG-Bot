@@ -139,17 +139,20 @@ async def get_available_resale_gifts(user_id: int) -> list[dict]:
 
 
 async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = None,
-                                   max_check: int = 100) -> dict | None:
+                                   max_check: int = None) -> dict | None:
     """
     Находит самый дешевый подарок по ID за звезды (не TON).
+    Ищет до первого найденного подарка за звезды (самый дешевый).
 
     :param user_id: Telegram ID владельца отправитель-сессии
     :param gift_id: ID типа подарка для поиска
     :param max_price: Максимальная цена в звездах (если None - без ограничений)
-    :param max_check: Максимальное количество подарков для проверки
+    :param max_check: НЕ ИСПОЛЬЗУЕТСЯ - для совместимости
     :return: Словарь с данными подарка или None если не найден
     """
-    logger.debug(f"🔍 ПОИСК: Начало поиска подарка ID {gift_id} (макс. цена: {max_price}, макс. проверок: {max_check})")
+    logger.info(f"🔍 ПОИСК: Поиск самого дешевого подарка ID {gift_id} за звезды")
+    if max_price:
+        logger.info(f"💰 ПОИСК: Ценовой лимит: ★{max_price:,}")
 
     if not is_userbot_active(user_id):
         logger.debug("📤 ПОИСК: Отправитель неактивен - поиск невозможен")
@@ -167,10 +170,6 @@ async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = 
             logger.error("❌ ПОИСК: Не удалось получить клиент отправителя")
             return None
 
-        logger.info(f"🔍 ПОИСК: Поиск самого дешевого подарка ID {gift_id} за звезды")
-        if max_price:
-            logger.info(f"💰 ПОИСК: Ценовой лимит: ★{max_price:,}")
-
         # Ищем подарки для перепродажи по ID, отсортированные по цене
         logger.debug("📞 ПОИСК: Вызов search_gifts_for_resale с сортировкой по цене")
         gifts_generator = client.search_gifts_for_resale(
@@ -179,26 +178,21 @@ async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = 
         )
 
         checked = 0
-        found_gifts = []
-        suitable_gifts = []
 
         async for gift in gifts_generator:
             checked += 1
 
             # Нормализуем данные подарка
             gift_data = normalize_resale_gift(gift)
-            found_gifts.append(gift_data)
 
-            # Показываем прогресс каждые 25 подарков
-            if checked % 25 == 0:
+            # Показываем прогресс каждые 50 подарков
+            if checked % 50 == 0:
                 logger.debug(f"🔄 ПОИСК: Проверено {checked} подарков для ID {gift_id}")
 
             # Проверяем что подарок доступен за звезды
             if gift_data["available_for_stars"] and gift_data["price"] > 0:
                 # Проверяем максимальную цену если задана
                 if max_price is None or gift_data["price"] <= max_price:
-                    suitable_gifts.append(gift_data)
-
                     logger.info(f"✅ ПОИСК: Найден подходящий подарок ID {gift_id}")
                     logger.info(f"🎁 ПОИСК: Название: {gift_data['name']}")
                     logger.info(f"💰 ПОИСК: Цена: ★{gift_data['price']:,}")
@@ -206,32 +200,12 @@ async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = 
                     logger.info(f"📊 ПОИСК: Найден после проверки {checked} подарков")
 
                     return gift_data
+                else:
+                    # Найден самый дешевый подарок, но он дороже лимита
+                    logger.warning(f"💸 ПОИСК: Самый дешевый найденный подарок (★{gift_data['price']:,}) дороже лимита (★{max_price:,}) - {gift_data['link']}")
+                    return None
 
-            # Ограничиваем количество проверок
-            if checked >= max_check:
-                logger.debug(f"🛑 ПОИСК: Достигнут лимит проверок ({max_check}) для подарка ID {gift_id}")
-                break
-
-        # Логируем результаты поиска
-        star_gifts = [g for g in found_gifts if g["available_for_stars"]]
-        ton_only_gifts = [g for g in found_gifts if g["resale_ton_only"]]
-
-        logger.info(f"📊 ПОИСК: Статистика поиска ID {gift_id}:")
-        logger.info(f"📊 ПОИСК: Всего проверено: {checked}")
-        logger.info(f"📊 ПОИСК: Доступно за звезды: {len(star_gifts)}")
-        logger.info(f"📊 ПОИСК: Только за TON: {len(ton_only_gifts)}")
-
-        if star_gifts:
-            prices = [g["price"] for g in star_gifts if g["price"] > 0]
-            if prices:
-                min_price = min(prices)
-                max_found_price = max(prices)
-                logger.info(f"📊 ПОИСК: Диапазон цен за звезды: ★{min_price:,} - ★{max_found_price:,}")
-
-                if max_price and min_price > max_price:
-                    logger.warning(f"💸 ПОИСК: Самый дешевый подарок (★{min_price:,}) дороже лимита (★{max_price:,})")
-
-        logger.info(f"❌ ПОИСК: Подходящий подарок ID {gift_id} не найден")
+        logger.info(f"❌ ПОИСК: Подходящий подарок ID {gift_id} не найден после проверки {checked} подарков")
         return None
 
     except Exception as e:

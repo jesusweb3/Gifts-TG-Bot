@@ -60,8 +60,7 @@ async def update_target_cache(user_id: int, target_index: int, target: dict) -> 
         gift_data = await find_cheapest_gift_by_id(
             user_id=user_id,
             gift_id=gift_id,
-            max_price=max_price,
-            max_check=50
+            max_price=max_price
         )
 
         # Обновляем кеш
@@ -76,7 +75,7 @@ async def update_target_cache(user_id: int, target_index: int, target: dict) -> 
         }
 
         if gift_data:
-            logger.info(
+            logger.debug(
                 f"✅ КЕШИРОВАНИЕ: Найден подарок для таргета #{target_index}: {gift_data['name']} за ★{gift_data['price']:,}")
         else:
             logger.debug(f"📦 КЕШИРОВАНИЕ: Подарок для таргета #{target_index} не найден в пределах ★{max_price:,}")
@@ -99,8 +98,6 @@ async def userbot_targets_updater(user_id: int) -> None:
     :return: None
     """
     global last_global_update
-
-    logger.info("🎯 ВОРКЕР ТАРГЕТОВ: Запуск воркера обновления кеша таргетов")
 
     cycle_count = 0
     last_log_time = 0
@@ -137,13 +134,7 @@ async def userbot_targets_updater(user_id: int) -> None:
                     await asyncio.sleep(update_interval)
                     continue
 
-                # Периодическое логирование активности (каждые 10 минут)
-                if cycle_count == 1 or current_time - last_log_time > 600:
-                    logger.info(
-                        f"🔄 ВОРКЕР ТАРГЕТОВ: Цикл #{cycle_count} - обновление кеша для {len(enabled_targets)} активных таргетов")
-                    last_log_time = current_time
-
-                # Обновляем каждый активный таргет
+                # Обновляем каждый активный таргет БЕЗ избыточного логирования
                 updated_count = 0
                 found_gifts_count = 0
 
@@ -168,13 +159,10 @@ async def userbot_targets_updater(user_id: int) -> None:
 
                 last_global_update = time.time()
 
-                # Логируем результат обновления
+                # Логируем результат обновления только если что-то найдено
                 if found_gifts_count > 0:
-                    logger.info(
-                        f"✅ ВОРКЕР ТАРГЕТОВ: Обновление завершено - найдены подарки для {found_gifts_count}/{len(enabled_targets)} таргетов")
-                else:
                     logger.debug(
-                        f"📦 ВОРКЕР ТАРГЕТОВ: Обновление завершено - подарки не найдены ({updated_count} таргетов проверено)")
+                        f"✅ ВОРКЕР ТАРГЕТОВ: Обновление завершено - найдены подарки для {found_gifts_count}/{len(enabled_targets)} таргетов")
 
             except asyncio.CancelledError:
                 logger.info("🛑 ВОРКЕР ТАРГЕТОВ: Воркер остановлен по запросу")

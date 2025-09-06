@@ -20,7 +20,7 @@
 import asyncio
 import logging
 import sys
-from typing import Set, Optional
+from typing import Set
 
 # --- Сторонние библиотеки ---
 from aiogram import Bot, Dispatcher
@@ -68,7 +68,6 @@ if not TOKEN or not USER_ID:
 
 # Глобальные переменные для управления воркерами
 _running_tasks: Set[asyncio.Task] = set()
-_bot_instance: Optional[Bot] = None
 
 
 def are_workers_running() -> bool:
@@ -106,17 +105,14 @@ async def stop_workers() -> None:
     logger.info("✅ ВОРКЕРЫ: Все воркеры успешно остановлены")
 
 
-async def start_workers() -> bool:
+async def start_workers(bot: Bot) -> bool:
     """
     Запускает фоновые воркеры если все условия выполнены.
 
+    :param bot: Экземпляр бота aiogram
     :return: True если воркеры запущены успешно
     """
-    global _running_tasks, _bot_instance
-
-    if not _bot_instance:
-        logger.error("❌ ВОРКЕРЫ: Экземпляр бота не найден")
-        return False
+    global _running_tasks
 
     # Проверяем условия для запуска
     config = await get_valid_config()
@@ -147,17 +143,12 @@ async def start_workers() -> bool:
 
     # Останавливаем существующие воркеры если есть
     if _running_tasks:
-        logger.info("🔄 ВОРКЕРЫ: Остановка существующих воркеров перед запуском новых")
         await stop_workers()
 
-    logger.info("🚀 ВОРКЕРЫ: Все условия выполнены - запуск фоновых воркеров")
-
-    # Запускаем воркеры
-    logger.info("🛒 ВОРКЕРЫ: Запуск воркера покупки подарков")
-    purchase_task = asyncio.create_task(gift_purchase_worker(_bot_instance), name="gift_purchase_worker")
+    # Запускаем воркеры БЕЗ избыточного логирования
+    purchase_task = asyncio.create_task(gift_purchase_worker(bot), name="gift_purchase_worker")
     _running_tasks.add(purchase_task)
 
-    logger.info("🎯 ВОРКЕРЫ: Запуск воркера обновления таргетов")
     targets_task = asyncio.create_task(userbot_targets_updater(USER_ID), name="userbot_targets_updater")
     _running_tasks.add(targets_task)
 
@@ -174,9 +165,6 @@ async def start_workers() -> bool:
     purchase_task.add_done_callback(task_done_callback)
     targets_task.add_done_callback(task_done_callback)
 
-    logger.info(f"✅ ВОРКЕРЫ: Запущено {len(_running_tasks)} фоновых воркеров")
-    logger.info(f"🎯 ВОРКЕРЫ: Активных таргетов: {len(enabled_targets)}")
-
     return True
 
 
@@ -189,14 +177,10 @@ async def gift_purchase_worker(bot: Bot) -> None:
     :param bot: Экземпляр бота aiogram
     :return: None
     """
-    logger.info("🔄 ВОРКЕР ПОКУПОК: Запуск воркера покупки подарков по таргетам")
-
-    # Инициализация баланса
-    logger.debug("🔄 ВОРКЕР ПОКУПОК: Инициализация баланса отправителя")
+    # Инициализация баланса БЕЗ лога
     await refresh_balance()
 
     cycle_count = 0
-    logger.info("🟢 ВОРКЕР ПОКУПОК: Воркер успешно запущен и готов к работе")
 
     try:
         while True:
@@ -389,6 +373,9 @@ async def gift_purchase_worker(bot: Bot) -> None:
                             logger.debug(
                                 "📦 ВОРКЕР ПОКУПОК: Доступные подарки есть, но покупка не удалась (возможно, уже куплены)")
 
+            except asyncio.CancelledError:
+                logger.info("🛑 ВОРКЕР ПОКУПОК: Воркер остановлен по запросу")
+                raise
             except Exception as e:
                 logger.error(f"💥 ВОРКЕР ПОКУПОК: Критическая ошибка в цикле: {e}", exc_info=True)
 
@@ -415,8 +402,6 @@ async def main() -> None:
 
     :return: None
     """
-    global _bot_instance
-
     logger.info("=" * 80)
     logger.info(f"🚀 STARTUP: Telegram Gifts Bot v{VERSION} - ЗАПУСК ПРИЛОЖЕНИЯ")
     logger.info("=" * 80)
@@ -433,7 +418,6 @@ async def main() -> None:
     # Создаем бота
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
-    _bot_instance = bot  # Сохраняем ссылку для воркеров
     logger.info("✅ STARTUP: Экземпляр бота создан")
 
     # Получаем информацию о боте
@@ -461,7 +445,7 @@ async def main() -> None:
     logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
-    # Регистрируем модульные хендлеры
+    # Регистрируем модульные хендлеры (передаем bot в каждый модуль)
     register_targets_handlers(dp)
     register_sender_handlers(dp)
     register_wizard_states_handlers(dp)

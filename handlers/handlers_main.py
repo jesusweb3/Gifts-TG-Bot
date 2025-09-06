@@ -170,8 +170,6 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         old_status = config.get("ACTIVE", False)
         new_status = not old_status
 
-        logger.info(f"🔄 MAIN: Переключение статуса активности: {old_status} → {new_status}")
-
         config["ACTIVE"] = new_status
         await save_config(config)
 
@@ -180,13 +178,16 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
 
         if new_status:
             # Включаем систему
-            logger.info("🟢 MAIN: Активация системы - попытка запуска воркеров")
+            # Подсчитываем активные подарки для вывода в лог
+            targets = config.get("TARGETS", [])
+            enabled_targets = [t for t in targets if t.get("ENABLED", True)]
+            gifts_count = len(enabled_targets)
 
-            workers_started = await start_workers()
+            workers_started = await start_workers(bot)
 
             if workers_started:
-                logger.info("✅ MAIN: Система успешно активирована, воркеры запущены")
-                status_message = "🟢 Система активирована и воркеры запущены"
+                logger.info(f"✅ MAIN: Система успешно активирована, воркеры запущены для {gifts_count} подарков")
+                status_message = f"🟢 Система активирована для {gifts_count} подарков"
             else:
                 logger.warning("⚠️ MAIN: Система активирована, но воркеры не запущены (не выполнены условия)")
                 status_message = "🟡 Система активирована, но проверьте настройки"
@@ -197,8 +198,6 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
                 new_status = False
         else:
             # Выключаем систему
-            logger.info("🔴 MAIN: Деактивация системы - остановка воркеров")
-
             if are_workers_running():
                 await stop_workers()
                 logger.info("✅ MAIN: Система деактивирована, воркеры остановлены")
