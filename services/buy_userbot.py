@@ -51,40 +51,66 @@ async def buy_resold_gift_userbot(
     :param retries: Количество попыток
     :return: True, если покупка успешна
     """
+    logger.info("💳 ПОКУПКА: ========== НАЧАЛО ПРОЦЕССА ПОКУПКИ ПОДАРКА ==========")
+    logger.info(f"💳 ПОКУПКА: Ссылка на подарок: {gift_link}")
+    logger.info(f"💳 ПОКУПКА: Ожидаемая цена: ★{expected_price:,}")
+
+    # Определяем получателя для логирования
+    if target_user_id:
+        recipient_display = f"User ID: {target_user_id}"
+    elif target_chat_id:
+        recipient_display = f"Chat: {target_chat_id}"
+    else:
+        recipient_display = "Не указан"
+    logger.info(f"💳 ПОКУПКА: Получатель: {recipient_display}")
+
+    # Проверяем баланс
     config = await get_valid_config()
     userbot_config = config.get("USERBOT", {})
     userbot_balance = userbot_config.get("BALANCE", 0)
 
-    if userbot_balance < expected_price:
-        logger.error(
-            f"Недостаточно звёзд для покупки подарка {gift_link} (требуется: {expected_price}, доступно: {userbot_balance})")
+    logger.debug(f"💰 ПОКУПКА: Проверка баланса - доступно: ★{userbot_balance:,}, требуется: ★{expected_price:,}")
 
-        config = await get_valid_config()
+    if userbot_balance < expected_price:
+        logger.error(f"💸 ПОКУПКА: НЕДОСТАТОЧНО БАЛАНСА!")
+        logger.error(f"💰 ПОКУПКА: Доступно: ★{userbot_balance:,}")
+        logger.error(f"💸 ПОКУПКА: Требуется: ★{expected_price:,}")
+        logger.error(f"📉 ПОКУПКА: Не хватает: ★{expected_price - userbot_balance:,}")
+
+        # Отключаем отправитель из-за недостатка средств
+        logger.warning("⚠️ ПОКУПКА: Отключение отправителя из-за недостатка баланса")
         config["USERBOT"]["ENABLED"] = False
         await save_config(config)
 
         return False
 
+    logger.info("✅ ПОКУПКА: Баланс достаточен для покупки")
+
+    # Получаем клиент отправителя
     client: Client = await get_userbot_client(session_user_id)
     if client is None:
-        logger.error("Не удалось получить объект клиента отправителя.")
+        logger.error("❌ ПОКУПКА: Не удалось получить клиент отправителя")
         return False
 
-    # Определяем получателя
+    logger.debug("📤 ПОКУПКА: Клиент отправителя получен")
+
+    # Определяем получателя для API
     recipient = target_user_id if target_user_id and not target_chat_id else (
         target_chat_id.lstrip('@') if target_chat_id and not target_user_id else None
     )
 
     if recipient is None:
-        logger.warning("Указаны оба параметра — target_user_id и target_chat_id, или ни одного. Прерываем.")
+        logger.error("❌ ПОКУПКА: Неверная конфигурация получателя - указаны оба параметра или ни одного")
         return False
 
+    logger.debug(f"📥 ПОКУПКА: Получатель для API: {recipient}")
+
+    # Попытки покупки
     for attempt in range(1, retries + 1):
+        logger.info(f"🔄 ПОКУПКА: Попытка #{attempt}/{retries}")
+
         try:
-            logger.info(f"Попытка {attempt}/{retries} покупки подарка с перепродажи...")
-            logger.info(f"Подарок: {gift_link}")
-            logger.info(f"Получатель: {recipient}")
-            logger.info(f"Ожидаемая цена: {expected_price} звезд")
+            logger.debug("📞 ПОКУПКА: Вызов send_resold_gift")
 
             # Покупаем подарок с перепродажи
             result = await client.send_resold_gift(
@@ -94,54 +120,75 @@ async def buy_resold_gift_userbot(
             )
 
             if result:
+                logger.info("🎉 ПОКУПКА: ПОКУПКА УСПЕШНА!")
+                logger.info(f"📄 ПОКУПКА: Message ID: {result.id}")
+                logger.info(f"📅 ПОКУПКА: Дата отправки: {result.date}")
+
                 # Обновляем баланс в конфиге
+                logger.debug(f"💰 ПОКУПКА: Списание ★{expected_price:,} с баланса")
                 new_balance = await change_balance_userbot(-expected_price)
 
-                logger.info(f"Успешная покупка подарка с перепродажи за {expected_price} звёзд. Остаток: {new_balance}")
-                logger.info(f"Message ID: {result.id}, Дата: {result.date}")
+                logger.info(f"💰 ПОКУПКА: Новый баланс: ★{new_balance:,}")
+                logger.info("✅ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА УСПЕШНО ==========")
 
                 return True
             else:
-                logger.error("send_resold_gift вернул None - покупка не удалась")
+                logger.error("❌ ПОКУПКА: send_resold_gift вернул None - покупка не удалась")
+                logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
                 return False
 
         except FloodWait as e:
-            logger.error(f"Flood wait: ждём {e.value} секунд")
+            logger.warning(f"⏳ ПОКУПКА: Flood wait - ожидание {e.value} секунд")
+            logger.info(f"⏳ ПОКУПКА: Попытка #{attempt} приостановлена из-за ограничений Telegram")
             await asyncio.sleep(e.value)
 
         except BadRequest as e:
             error_msg = str(e)
+            logger.error(f"❌ ПОКУПКА: BadRequest - {error_msg}")
+
             if "BALANCE_TOO_LOW" in error_msg or "not enough" in error_msg.lower():
-                logger.error(f"Недостаточно звёзд: {e}")
+                logger.error("💸 ПОКУПКА: Недостаточно звёзд на стороне Telegram")
+                logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
                 return False
             elif "GIFT_NOT_FOUND" in error_msg:
-                logger.error(f"Подарок не найден или уже куплен: {e}")
+                logger.error("🎁 ПОКУПКА: Подарок не найден или уже куплен")
+                logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
                 return False
             elif "PRICE_CHANGED" in error_msg:
-                logger.error(f"Цена подарка изменилась: {e}")
+                logger.error("💰 ПОКУПКА: Цена подарка изменилась")
+                logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
                 return False
             else:
-                logger.error(f"(BadRequest) Критическая ошибка: {e}")
+                logger.error(f"❌ ПОКУПКА: Критическая ошибка BadRequest: {e}")
+                logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
                 return False
 
         except Forbidden as e:
-            logger.error(f"(Forbidden) Критическая ошибка: {e}")
+            logger.error(f"🚫 ПОКУПКА: Forbidden - доступ запрещен: {e}")
+            logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
             return False
 
         except AuthKeyUnregistered as e:
-            logger.error(f"(AuthKeyUnregistered) Критическая ошибка: {e}")
+            logger.error(f"🔑 ПОКУПКА: AuthKeyUnregistered - сессия недействительна: {e}")
+            logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
             return False
 
         except RPCError as e:
-            logger.error(f"RPC ошибка: {e}")
-            await asyncio.sleep(2 ** attempt)
+            delay = 2 ** attempt
+            logger.warning(f"⚠️ ПОКУПКА: RPC ошибка (попытка {attempt}): {e}")
+            logger.info(f"⏳ ПОКУПКА: Повтор через {delay} секунд")
+            await asyncio.sleep(delay)
 
         except Exception as e:
             delay = 2 ** attempt
-            logger.error(f"[{attempt}/{retries}] Ошибка отправителя при покупке: {e}. Повтор через {delay} сек...")
-            await asyncio.sleep(delay)
+            logger.error(f"💥 ПОКУПКА: Неожиданная ошибка (попытка {attempt}): {e}")
+            if attempt < retries:
+                logger.info(f"⏳ ПОКУПКА: Повтор через {delay} секунд")
+                await asyncio.sleep(delay)
 
-    logger.error(f"Не удалось купить подарок {gift_link} после {retries} попыток.")
+    logger.error(f"❌ ПОКУПКА: Не удалось купить подарок после {retries} попыток")
+    logger.error(f"🔗 ПОКУПКА: Ссылка: {gift_link}")
+    logger.error("❌ ПОКУПКА: ========== ПОКУПКА ЗАВЕРШЕНА С ОШИБКОЙ ==========")
     return False
 
 
@@ -160,35 +207,53 @@ async def validate_gift_purchase(
     :param max_price: Максимальная допустимая цена
     :return: True если данные валидны
     """
+    logger.debug("✅ ВАЛИДАЦИЯ: Начало валидации данных подарка")
+
     required_fields = ['link', 'price', 'name']
 
     # Проверяем наличие обязательных полей
-    for field in required_fields:
-        if not gift_data.get(field):
-            logger.error(f"Отсутствует обязательное поле: {field}")
-            return False
+    missing_fields = [field for field in required_fields if not gift_data.get(field)]
+    if missing_fields:
+        logger.error(f"❌ ВАЛИДАЦИЯ: Отсутствуют обязательные поля: {missing_fields}")
+        return False
 
     # Проверяем цену
-    if gift_data['price'] <= 0:
-        logger.error(f"Некорректная цена подарка: {gift_data['price']}")
+    gift_price = gift_data['price']
+    if gift_price <= 0:
+        logger.error(f"❌ ВАЛИДАЦИЯ: Некорректная цена подарка: {gift_price}")
         return False
 
-    if gift_data['price'] > max_price:
-        logger.error(f"Цена подарка ({gift_data['price']}) превышает лимит ({max_price})")
+    if gift_price > max_price:
+        logger.error(f"❌ ВАЛИДАЦИЯ: Цена подарка (★{gift_price:,}) превышает лимит (★{max_price:,})")
         return False
+
+    logger.debug(f"✅ ВАЛИДАЦИЯ: Цена подарка корректна: ★{gift_price:,} (лимит: ★{max_price:,})")
 
     # Проверяем получателя
     if not target_user_id and not target_chat_id:
-        logger.error("Не указан получатель подарка")
+        logger.error("❌ ВАЛИДАЦИЯ: Не указан получатель подарка")
         return False
 
     if target_user_id and target_chat_id:
-        logger.error("Указаны оба получателя - user_id и chat_id")
+        logger.error("❌ ВАЛИДАЦИЯ: Указаны оба получателя - user_id и chat_id")
         return False
+
+    if target_user_id:
+        logger.debug(f"✅ ВАЛИДАЦИЯ: Получатель - User ID: {target_user_id}")
+    else:
+        logger.debug(f"✅ ВАЛИДАЦИЯ: Получатель - Chat: {target_chat_id}")
 
     # Проверяем ссылку на подарок
-    if not gift_data['link'].startswith('https://t.me/nft/'):
-        logger.error(f"Некорректная ссылка на подарок: {gift_data['link']}")
+    gift_link = gift_data['link']
+    if not gift_link.startswith('https://t.me/nft/'):
+        logger.error(f"❌ ВАЛИДАЦИЯ: Некорректная ссылка на подарок: {gift_link}")
         return False
 
+    logger.debug(f"✅ ВАЛИДАЦИЯ: Ссылка на подарок корректна: {gift_link}")
+
+    # Проверяем название подарка
+    gift_name = gift_data['name']
+    logger.debug(f"✅ ВАЛИДАЦИЯ: Название подарка: {gift_name}")
+
+    logger.debug("✅ ВАЛИДАЦИЯ: Все проверки пройдены успешно")
     return True

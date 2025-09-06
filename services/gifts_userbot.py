@@ -52,7 +52,7 @@ def normalize_resale_gift(gift) -> dict:
     if hasattr(gift, 'attributes') and gift.attributes:
         attributes = [attr.name for attr in gift.attributes if hasattr(attr, 'name')]
 
-    return {
+    result = {
         "id": collectible_id,
         "gift_id": getattr(gift, 'gift_id', None),
         "price": star_price or 0,
@@ -63,6 +63,11 @@ def normalize_resale_gift(gift) -> dict:
         "available_for_stars": star_price is not None and not resale_ton_only
     }
 
+    logger.debug(
+        f"🔄 НОРМАЛИЗАЦИЯ: Подарок {name} - цена: ★{star_price or 0}, доступен за звезды: {result['available_for_stars']}")
+
+    return result
+
 
 async def get_available_resale_gifts(user_id: int) -> list[dict]:
     """
@@ -71,24 +76,30 @@ async def get_available_resale_gifts(user_id: int) -> list[dict]:
     :param user_id: Telegram ID владельца отправитель-сессии
     :return: Список словарей с доступными подарками для перепродажи
     """
+    logger.debug(f"🎁 ПОДАРКИ: Запрос списка подарков для перепродажи (пользователь {user_id})")
+
     if not is_userbot_active(user_id):
+        logger.debug("📤 ПОДАРКИ: Отправитель неактивен - возвращаем пустой список")
         return []
 
     try:
         config = await get_valid_config()
         userbot_config = config.get("USERBOT", {})
         if not userbot_config.get("ENABLED", False):
+            logger.debug("📤 ПОДАРКИ: Отправитель отключен в конфиге - возвращаем пустой список")
             return []
 
         client: Client = await get_userbot_client(user_id)
         if client is None:
-            logger.error("Не удалось получить объект клиента отправителя.")
+            logger.error("❌ ПОДАРКИ: Не удалось получить клиент отправителя")
             return []
+
+        logger.debug("📞 ПОДАРКИ: Запрос базовых подарков через get_available_gifts")
 
         # Получаем подарки доступные для покупки
         available_gifts: list[Gift] = await client.get_available_gifts()
-        if MORE_LOGS:
-            logger.info(f"Получено {len(available_gifts)} базовых подарков от отправителя.")
+
+        logger.info(f"📦 ПОДАРКИ: Получено {len(available_gifts)} базовых типов подарков")
 
         # Фильтруем только те, которые доступны для перепродажи
         resale_gifts = []
@@ -109,17 +120,25 @@ async def get_available_resale_gifts(user_id: int) -> list[dict]:
                     'resale_amount': resale_amount
                 })
 
-        if MORE_LOGS:
-            logger.info(f"Найдено {len(resale_gifts)} подарков доступных для перепродажи")
+                if MORE_LOGS:
+                    logger.debug(
+                        f"✅ ПОДАРКИ: Доступен для перепродажи - {title} (ID: {gift_id}, количество: {resale_amount})")
+
+        logger.info(f"🎯 ПОДАРКИ: Найдено {len(resale_gifts)} типов подарков доступных для перепродажи")
+
+        if resale_gifts:
+            total_amount = sum(gift['resale_amount'] for gift in resale_gifts)
+            logger.info(f"📊 ПОДАРКИ: Общее количество подарков для перепродажи: {total_amount:,}")
 
         return resale_gifts
 
     except Exception as e:
-        logger.error(f"Ошибка получения подарков для перепродажи: {e}")
+        logger.error(f"💥 ПОДАРКИ: Ошибка получения подарков для перепродажи: {e}")
         return []
 
 
-async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = None, max_check: int = 100) -> dict | None:
+async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = None,
+                                   max_check: int = 100) -> dict | None:
     """
     Находит самый дешевый подарок по ID за звезды (не TON).
 
@@ -129,61 +148,93 @@ async def find_cheapest_gift_by_id(user_id: int, gift_id: int, max_price: int = 
     :param max_check: Максимальное количество подарков для проверки
     :return: Словарь с данными подарка или None если не найден
     """
+    logger.debug(f"🔍 ПОИСК: Начало поиска подарка ID {gift_id} (макс. цена: {max_price}, макс. проверок: {max_check})")
+
     if not is_userbot_active(user_id):
+        logger.debug("📤 ПОИСК: Отправитель неактивен - поиск невозможен")
         return None
 
     try:
         config = await get_valid_config()
         userbot_config = config.get("USERBOT", {})
         if not userbot_config.get("ENABLED", False):
+            logger.debug("📤 ПОИСК: Отправитель отключен в конфиге - поиск невозможен")
             return None
 
         client: Client = await get_userbot_client(user_id)
         if client is None:
-            logger.error("Не удалось получить объект клиента отправителя.")
+            logger.error("❌ ПОИСК: Не удалось получить клиент отправителя")
             return None
 
-        if MORE_LOGS:
-            logger.info(f"Поиск самого дешевого подарка ID {gift_id} за звезды (макс. цена: {max_price})")
+        logger.info(f"🔍 ПОИСК: Поиск самого дешевого подарка ID {gift_id} за звезды")
+        if max_price:
+            logger.info(f"💰 ПОИСК: Ценовой лимит: ★{max_price:,}")
 
         # Ищем подарки для перепродажи по ID, отсортированные по цене
+        logger.debug("📞 ПОИСК: Вызов search_gifts_for_resale с сортировкой по цене")
         gifts_generator = client.search_gifts_for_resale(
             gift_id=gift_id,
             order=enums.GiftForResaleOrder.PRICE
         )
 
         checked = 0
+        found_gifts = []
+        suitable_gifts = []
 
         async for gift in gifts_generator:
             checked += 1
 
             # Нормализуем данные подарка
             gift_data = normalize_resale_gift(gift)
+            found_gifts.append(gift_data)
 
             # Показываем прогресс каждые 25 подарков
-            if checked % 25 == 0 and MORE_LOGS:
-                logger.info(f"Проверено: {checked} подарков для ID {gift_id}...")
+            if checked % 25 == 0:
+                logger.debug(f"🔄 ПОИСК: Проверено {checked} подарков для ID {gift_id}")
 
             # Проверяем что подарок доступен за звезды
             if gift_data["available_for_stars"] and gift_data["price"] > 0:
                 # Проверяем максимальную цену если задана
                 if max_price is None or gift_data["price"] <= max_price:
-                    if MORE_LOGS:
-                        logger.info(f"Найден подходящий подарок ID {gift_id} за {gift_data['price']} звезд (проверено {checked} шт)")
+                    suitable_gifts.append(gift_data)
+
+                    logger.info(f"✅ ПОИСК: Найден подходящий подарок ID {gift_id}")
+                    logger.info(f"🎁 ПОИСК: Название: {gift_data['name']}")
+                    logger.info(f"💰 ПОИСК: Цена: ★{gift_data['price']:,}")
+                    logger.info(f"🔗 ПОИСК: Ссылка: {gift_data['link']}")
+                    logger.info(f"📊 ПОИСК: Найден после проверки {checked} подарков")
+
                     return gift_data
 
             # Ограничиваем количество проверок
             if checked >= max_check:
-                if MORE_LOGS:
-                    logger.info(f"Достигнут лимит проверок ({max_check}) для подарка ID {gift_id}")
+                logger.debug(f"🛑 ПОИСК: Достигнут лимит проверок ({max_check}) для подарка ID {gift_id}")
                 break
 
-        if MORE_LOGS:
-            logger.info(f"Подарок ID {gift_id} за звезды в пределах {max_price} не найден (проверено {checked} шт)")
+        # Логируем результаты поиска
+        star_gifts = [g for g in found_gifts if g["available_for_stars"]]
+        ton_only_gifts = [g for g in found_gifts if g["resale_ton_only"]]
+
+        logger.info(f"📊 ПОИСК: Статистика поиска ID {gift_id}:")
+        logger.info(f"📊 ПОИСК: Всего проверено: {checked}")
+        logger.info(f"📊 ПОИСК: Доступно за звезды: {len(star_gifts)}")
+        logger.info(f"📊 ПОИСК: Только за TON: {len(ton_only_gifts)}")
+
+        if star_gifts:
+            prices = [g["price"] for g in star_gifts if g["price"] > 0]
+            if prices:
+                min_price = min(prices)
+                max_found_price = max(prices)
+                logger.info(f"📊 ПОИСК: Диапазон цен за звезды: ★{min_price:,} - ★{max_found_price:,}")
+
+                if max_price and min_price > max_price:
+                    logger.warning(f"💸 ПОИСК: Самый дешевый подарок (★{min_price:,}) дороже лимита (★{max_price:,})")
+
+        logger.info(f"❌ ПОИСК: Подходящий подарок ID {gift_id} не найден")
         return None
 
     except Exception as e:
-        logger.error(f"Ошибка поиска подарка ID {gift_id}: {e}")
+        logger.error(f"💥 ПОИСК: Ошибка поиска подарка ID {gift_id}: {e}")
         return None
 
 
@@ -194,21 +245,27 @@ def validate_gift_id(gift_id: str | int) -> int | None:
     :param gift_id: ID подарка (строка или число)
     :return: Валидный ID как int или None если невалидный
     """
+    logger.debug(f"✅ ВАЛИДАЦИЯ: Проверка Gift ID: {gift_id} (тип: {type(gift_id).__name__})")
+
     try:
         if isinstance(gift_id, str):
             gift_id_int = int(gift_id)
         elif isinstance(gift_id, int):
             gift_id_int = gift_id
         else:
+            logger.error(f"❌ ВАЛИДАЦИЯ: Неподдерживаемый тип Gift ID: {type(gift_id).__name__}")
             return None
 
         # Простая проверка что ID не слишком маленький
         if gift_id_int < 1000000000:  # ID подарков обычно длинные
+            logger.error(f"❌ ВАЛИДАЦИЯ: Gift ID слишком короткий: {gift_id_int}")
             return None
 
+        logger.debug(f"✅ ВАЛИДАЦИЯ: Gift ID валиден: {gift_id_int}")
         return gift_id_int
 
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        logger.error(f"❌ ВАЛИДАЦИЯ: Ошибка преобразования Gift ID '{gift_id}': {e}")
         return None
 
 
@@ -220,8 +277,11 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
     :param gift_id: ID типа подарка
     :return: Словарь с информацией о доступности
     """
+    logger.info(f"🔍 ПРОВЕРКА: Проверка доступности подарка ID {gift_id} для пользователя {user_id}")
+
     validated_id = validate_gift_id(gift_id)
     if validated_id is None:
+        logger.error(f"❌ ПРОВЕРКА: Невалидный Gift ID: {gift_id}")
         return {
             "available": False,
             "error": "Невалидный ID подарка",
@@ -233,6 +293,7 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
         config = await get_valid_config()
         userbot_config = config.get("USERBOT", {})
         if not userbot_config.get("ENABLED", False):
+            logger.warning("⚠️ ПРОВЕРКА: Отправитель неактивен")
             return {
                 "available": False,
                 "error": "Отправитель не активен",
@@ -242,12 +303,15 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
 
         client: Client = await get_userbot_client(user_id)
         if client is None:
+            logger.error("❌ ПРОВЕРКА: Не удалось получить клиент отправителя")
             return {
                 "available": False,
                 "error": "Не удалось получить клиент отправителя",
                 "total_found": 0,
                 "cheapest_price": None
             }
+
+        logger.debug("📞 ПРОВЕРКА: Получение списка доступных типов подарков")
 
         # Получаем все доступные подарки (базовые типы)
         available_gifts: list[Gift] = await client.get_available_gifts()
@@ -261,6 +325,7 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
                 break
 
         if not target_gift:
+            logger.warning(f"⚠️ ПРОВЕРКА: Подарок ID {validated_id} не найден среди доступных типов")
             return {
                 "available": False,
                 "error": "Подарок с таким ID не найден среди доступных типов",
@@ -276,7 +341,10 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
         if title is None:
             title = 'Unknown'
 
+        logger.info(f"🎁 ПРОВЕРКА: Найден тип подарка: {title} (ID: {validated_id})")
+
         if not resale_amount or resale_amount <= 0:
+            logger.warning(f"⚠️ ПРОВЕРКА: Подарок '{title}' недоступен для перепродажи (количество: {resale_amount})")
             return {
                 "available": False,
                 "error": f"Подарок '{title}' не доступен для перепродажи (amount: {resale_amount})",
@@ -284,7 +352,10 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
                 "cheapest_price": None
             }
 
+        logger.info(f"✅ ПРОВЕРКА: Подарок доступен для перепродажи (количество: {resale_amount:,})")
+
         # Теперь ищем самый дешевый экземпляр этого подарка
+        logger.debug("🔍 ПРОВЕРКА: Поиск самого дешевого экземпляра")
         cheapest_gift = await find_cheapest_gift_by_id(
             user_id=user_id,
             gift_id=validated_id,
@@ -292,7 +363,7 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
             max_check=5  # Быстрая проверка
         )
 
-        return {
+        result = {
             "available": True,
             "error": None,
             "total_found": resale_amount,
@@ -301,7 +372,15 @@ async def check_gift_availability(user_id: int, gift_id: int) -> dict:
             "gift_name": title
         }
 
+        if cheapest_gift:
+            logger.info(f"✅ ПРОВЕРКА: Найден самый дешевый экземпляр за ★{cheapest_gift['price']:,}")
+        else:
+            logger.warning("⚠️ ПРОВЕРКА: Не найдено подходящих экземпляров за звезды")
+
+        return result
+
     except Exception as e:
+        logger.error(f"💥 ПРОВЕРКА: Ошибка проверки подарка ID {gift_id}: {e}")
         return {
             "available": False,
             "error": f"Ошибка проверки: {str(e)}",

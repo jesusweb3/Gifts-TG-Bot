@@ -6,13 +6,13 @@
 - Обработки команды /start.
 - Переходов по главным кнопкам меню.
 - Управления получателем подарков.
-- Переключения статуса активности.
+- Переключения статуса активности с управлением воркерами.
 
 Основные функции:
 - command_status_handler: Обрабатывает команду /start.
 - start_callback: Переход в главное меню.
 - recipient_menu: Управление получателем подарков.
-- toggle_active_callback: Переключает статус активности.
+- toggle_active_callback: Переключает статус активности и управляет воркерами.
 """
 
 # --- Сторонние библиотеки ---
@@ -20,6 +20,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
+import logging
 
 # --- Внутренние модули ---
 from services.config import get_valid_config, save_config, format_config_summary, get_target_display_local
@@ -27,12 +28,14 @@ from services.menu import update_menu, config_action_keyboard, send_main_menu, s
 from services.balance import refresh_balance
 from handlers.wizard_states import ConfigWizard
 
+logger = logging.getLogger(__name__)
+
 
 def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
     """
     Регистрирует все основные обработчики событий для главного меню Telegram-бота.
     Включает обработку команд /start, переходов по главным кнопкам,
-    управление получателем, переключение статуса.
+    управление получателем, переключение статуса с управлением воркерами.
     Все обработчики добавляются в диспетчер dp.
     """
 
@@ -44,13 +47,20 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         """
         # Простая проверка авторизации
         if message.from_user.id != user_id:
+            logger.warning(f"🚫 MAIN: Попытка несанкционированного доступа от пользователя {message.from_user.id}")
             await message.answer("⛔️ У вас нет доступа к этому боту.")
             return
 
+        logger.info(f"👤 MAIN: Команда /start от авторизованного пользователя {message.from_user.id}")
+
         await state.clear()
+        logger.debug("🔄 MAIN: Состояния FSM очищены")
+
+        logger.debug("💰 MAIN: Обновление баланса")
         await refresh_balance()
 
         # Отправляем главное меню (только при /start)
+        logger.info("📱 MAIN: Отправка главного меню")
         await send_main_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id)
 
     @dp.callback_query(F.data == "main_menu")
@@ -61,14 +71,20 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
+            logger.warning(f"🚫 MAIN: Попытка несанкционированного доступа от пользователя {call.from_user.id}")
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
+        logger.info(f"🏠 MAIN: Переход в главное меню от пользователя {call.from_user.id}")
+
         await state.clear()
         await call.answer()
+
+        logger.debug("💰 MAIN: Обновление баланса")
         await refresh_balance()
 
         # Обновляем меню в том же сообщении
+        logger.debug("📱 MAIN: Обновление главного меню")
         await update_menu(
             bot=call.bot,
             chat_id=call.message.chat.id,
@@ -84,8 +100,11 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
+            logger.warning(f"🚫 MAIN: Попытка несанкционированного доступа от пользователя {call.from_user.id}")
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
+
+        logger.info(f"📥 MAIN: Открытие меню получателя от пользователя {call.from_user.id}")
 
         config = await get_valid_config()
         target_display = get_target_display_local(
@@ -93,6 +112,8 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             config.get("TARGET_CHAT_ID"),
             call.from_user.id
         )
+
+        logger.debug(f"📥 MAIN: Текущий получатель: {target_display}")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Изменить получателя", callback_data="change_recipient")],
@@ -115,8 +136,11 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
+            logger.warning(f"🚫 MAIN: Попытка несанкционированного доступа от пользователя {call.from_user.id}")
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
+
+        logger.info(f"✏️ MAIN: Начало изменения получателя от пользователя {call.from_user.id}")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
@@ -142,15 +166,54 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         """
         Переключает статус активности бота для пользователя (активен/неактивен).
         Сохраняет изменения, обновляет интерфейс в том же сообщении и отправляет уведомление о смене статуса.
+        Управляет запуском и остановкой фоновых воркеров.
         """
         # Простая проверка авторизации
         if call.from_user.id != user_id:
+            logger.warning(f"🚫 MAIN: Попытка несанкционированного доступа от пользователя {call.from_user.id}")
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
         config = await get_valid_config()
-        config["ACTIVE"] = not config.get("ACTIVE", False)
+        old_status = config.get("ACTIVE", False)
+        new_status = not old_status
+
+        logger.info(f"🔄 MAIN: Переключение статуса активности: {old_status} → {new_status}")
+
+        config["ACTIVE"] = new_status
         await save_config(config)
+
+        # Импортируем функции управления воркерами
+        from main import start_workers, stop_workers, are_workers_running
+
+        if new_status:
+            # Включаем систему
+            logger.info("🟢 MAIN: Активация системы - попытка запуска воркеров")
+
+            workers_started = await start_workers()
+
+            if workers_started:
+                logger.info("✅ MAIN: Система успешно активирована, воркеры запущены")
+                status_message = "🟢 Система активирована и воркеры запущены"
+            else:
+                logger.warning("⚠️ MAIN: Система активирована, но воркеры не запущены (не выполнены условия)")
+                status_message = "🟡 Система активирована, но проверьте настройки"
+
+                # Возвращаем статус в неактивный если воркеры не запустились
+                config["ACTIVE"] = False
+                await save_config(config)
+                new_status = False
+        else:
+            # Выключаем систему
+            logger.info("🔴 MAIN: Деактивация системы - остановка воркеров")
+
+            if are_workers_running():
+                await stop_workers()
+                logger.info("✅ MAIN: Система деактивирована, воркеры остановлены")
+                status_message = "🔴 Система деактивирована, воркеры остановлены"
+            else:
+                logger.info("ℹ️ MAIN: Система деактивирована (воркеры уже были остановлены)")
+                status_message = "🔴 Система деактивирована"
 
         # Обновляем главное меню в том же сообщении
         info = format_config_summary(config, call.from_user.id)
@@ -160,5 +223,4 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             config_action_keyboard(config["ACTIVE"])
         )
 
-        status_text = "включен" if config["ACTIVE"] else "выключен"
-        await call.answer(f"Бот {status_text}")
+        await call.answer(status_message)

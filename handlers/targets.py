@@ -36,6 +36,8 @@ async def targets_menu(message: Message) -> None:
     Показывает пользователю главное меню управления таргетами в едином сообщении.
     Отображает список всех таргетов и предоставляет кнопки для их редактирования или добавления нового таргета.
     """
+    logger.debug("🎯 ТАРГЕТЫ: Формирование меню управления таргетами")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
@@ -95,6 +97,9 @@ async def targets_menu(message: Message) -> None:
         text_targets = f"🎯 <b>Таргетов пока нет (0/{max_targets})</b>\n\nДобавьте таргет, чтобы бот начал мониторить конкретные подарки по вашим ценовым лимитам."
 
     kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    logger.info(f"🎯 ТАРГЕТЫ: Отображение меню - всего: {len(targets)}, активных: {enabled_count}")
+
     await safe_edit_menu(
         message,
         f"{text_targets}\n\n"
@@ -110,6 +115,8 @@ async def on_targets_menu(call: CallbackQuery):
     Обрабатывает нажатие на кнопку "Таргеты" или переход к списку таргетов.
     Проверяет настройку отправителя и получателя перед доступом к таргетам.
     """
+    logger.info(f"🎯 ТАРГЕТЫ: Запрос меню таргетов от пользователя {call.from_user.id}")
+
     config = await get_valid_config()
 
     # Проверяем настройку отправителя
@@ -137,8 +144,11 @@ async def on_targets_menu(call: CallbackQuery):
         missing_text = " и ".join(missing_items)
         alert_text = f"⚠️ Сначала настройте: {missing_text}"
 
+        logger.warning(f"⚠️ ТАРГЕТЫ: Доступ к таргетам заблокирован - не настроены: {missing_text}")
         await call.answer(alert_text, show_alert=True)
         return
+
+    logger.info("✅ ТАРГЕТЫ: Проверки пройдены - показываем меню таргетов")
 
     # Если все настроено, показываем меню таргетов
     await targets_menu(call.message)
@@ -150,6 +160,7 @@ async def on_target_limit_reached(call: CallbackQuery):
     """
     Обрабатывает нажатие на кнопку лимита таргетов.
     """
+    logger.warning(f"⚠️ ТАРГЕТЫ: Пользователь {call.from_user.id} достиг лимита таргетов (20)")
     await call.answer("🚫 Достигнут максимальный лимит таргетов (20 шт). Удалите ненужные таргеты.", show_alert=True)
 
 
@@ -200,15 +211,23 @@ async def on_target_edit(call: CallbackQuery, state: FSMContext):
     Открывает экран подробного редактирования конкретного таргета.
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"✏️ ТАРГЕТЫ: Пользователь {call.from_user.id} редактирует таргет #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден (всего таргетов: {len(targets)})")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
     target = targets[idx]
     enabled = target.get('ENABLED', True)
+    gift_name = target.get('GIFT_NAME', '🎁')
+
+    logger.debug(f"✏️ ТАРГЕТЫ: Открытие редактирования таргета #{idx}: {gift_name}")
+
     await state.update_data(target_index=idx)
 
     await safe_edit_menu(
@@ -225,17 +244,25 @@ async def on_target_toggle(call: CallbackQuery):
     Переключает статус активности таргета (включён/выключен).
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"🔄 ТАРГЕТЫ: Пользователь {call.from_user.id} переключает статус таргета #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден для переключения статуса")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
     target = targets[idx]
-    new_enabled = not target.get('ENABLED', True)
+    old_enabled = target.get('ENABLED', True)
+    new_enabled = not old_enabled
+    gift_name = target.get('GIFT_NAME', '🎁')
 
     await update_target(config, idx, enabled=new_enabled, save=True)
+
+    logger.info(f"✅ ТАРГЕТЫ: Статус таргета #{idx} '{gift_name}' изменен: {old_enabled} → {new_enabled}")
 
     await safe_edit_menu(
         call.message,
@@ -252,6 +279,17 @@ async def on_target_add(call: CallbackQuery, state: FSMContext):
     """
     Запускает процесс добавления нового таргета в едином сообщении.
     """
+    logger.info(f"➕ ТАРГЕТЫ: Пользователь {call.from_user.id} начинает добавление нового таргета")
+
+    # Проверяем лимит таргетов
+    config = await get_valid_config()
+    current_targets = config.get("TARGETS", [])
+
+    if len(current_targets) >= 20:
+        logger.warning(f"⚠️ ТАРГЕТЫ: Попытка добавить таргет при достижении лимита (20/20)")
+        await call.answer("🚫 Достигнут максимальный лимит таргетов (20 шт)", show_alert=True)
+        return
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
     ])
@@ -276,16 +314,22 @@ async def edit_target_price(call: CallbackQuery, state: FSMContext):
     Запускает FSM для редактирования цены таргета.
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"💰 ТАРГЕТЫ: Пользователь {call.from_user.id} редактирует цену таргета #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден для редактирования цены")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
     target = targets[idx]
     gift_name = target.get('GIFT_NAME', '🎁')
     current_price = target.get('MAX_PRICE', 0)
+
+    logger.debug(f"💰 ТАРГЕТЫ: Текущая цена таргета #{idx} '{gift_name}': ★{current_price:,}")
 
     await state.update_data(target_index=idx)
 
@@ -315,10 +359,14 @@ async def on_target_delete_confirm(call: CallbackQuery):
     Запрашивает подтверждение удаления таргета.
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"🗑️ ТАРГЕТЫ: Пользователь {call.from_user.id} запрашивает удаление таргета #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден для удаления")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
@@ -326,6 +374,8 @@ async def on_target_delete_confirm(call: CallbackQuery):
     gift_name = target.get('GIFT_NAME', '🎁')
     max_price = target.get('MAX_PRICE', 0)
     gift_id = target.get('GIFT_ID', 'N/A')
+
+    logger.debug(f"🗑️ ТАРГЕТЫ: Подтверждение удаления таргета #{idx}: {gift_name} (★{max_price:,})")
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -352,17 +402,25 @@ async def on_target_delete_final(call: CallbackQuery):
     Окончательно удаляет таргет после подтверждения.
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"🗑️ ТАРГЕТЫ: Пользователь {call.from_user.id} подтверждает удаление таргета #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден для окончательного удаления")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
     target = targets[idx]
     gift_name = target.get('GIFT_NAME', '🎁')
+    gift_id = target.get('GIFT_ID', 'N/A')
+    max_price = target.get('MAX_PRICE', 0)
 
     await remove_target(config, idx, save=True)
+
+    logger.info(f"✅ ТАРГЕТЫ: Таргет #{idx} '{gift_name}' (ID: {gift_id}, ★{max_price:,}) успешно удален")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎯 Таргеты", callback_data="targets_menu")],
@@ -381,10 +439,14 @@ async def on_target_delete_cancel(call: CallbackQuery):
     Отмена удаления таргета.
     """
     idx = int(call.data.split("_")[-1])
+
+    logger.info(f"↩️ ТАРГЕТЫ: Пользователь {call.from_user.id} отменил удаление таргета #{idx}")
+
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
 
     if idx >= len(targets):
+        logger.error(f"❌ ТАРГЕТЫ: Таргет #{idx} не найден при отмене удаления")
         await call.answer("🚫 Таргет не найден.", show_alert=True)
         return
 
@@ -404,3 +466,4 @@ def register_targets_handlers(dp) -> None:
     Регистрирует все хендлеры, связанные с управлением таргетами.
     """
     dp.include_router(targets_router)
+    logger.debug("📝 ТАРГЕТЫ: Обработчики таргетов зарегистрированы")

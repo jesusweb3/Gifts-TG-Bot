@@ -29,8 +29,10 @@ def config_action_keyboard(active: bool) -> InlineKeyboardMarkup:
     """
     Генерирует inline-клавиатуру для меню с действиями (система таргетов).
     """
+    logger.debug(f"🎛️ МЕНЮ: Генерация клавиатуры для {'активной' if active else 'неактивной'} системы")
+
     toggle_text = "🔴 Выключить" if active else "🟢 Включить"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=toggle_text, callback_data="toggle_active"),
             InlineKeyboardButton(text="🎯 Таргеты", callback_data="targets_menu")
@@ -40,6 +42,9 @@ def config_action_keyboard(active: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu")
         ]
     ])
+
+    logger.debug(f"🎛️ МЕНЮ: Клавиатура сгенерирована с кнопкой '{toggle_text}'")
+    return keyboard
 
 
 async def safe_edit_menu(message: Message, text: str, reply_markup: InlineKeyboardMarkup = None) -> bool:
@@ -52,31 +57,45 @@ async def safe_edit_menu(message: Message, text: str, reply_markup: InlineKeyboa
     :param reply_markup: Новая клавиатура
     :return: True если успешно отредактировано, False если отправлено новое
     """
+    message_id = message.message_id
+    chat_id = message.chat.id
+
+    logger.debug(f"🔄 МЕНЮ: Попытка редактирования сообщения ID {message_id} в чате {chat_id}")
+
     try:
         await message.edit_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
+        logger.debug(f"✅ МЕНЮ: Сообщение ID {message_id} успешно отредактировано")
         return True
     except TelegramBadRequest as e:
+        error_msg = str(e).lower()
+
         # Если не можем отредактировать, отправляем новое сообщение
-        if "message is not modified" in str(e).lower():
+        if "message is not modified" in error_msg:
             # Сообщение не изменилось, это нормально
+            logger.debug(f"ℹ️ МЕНЮ: Сообщение ID {message_id} не изменилось")
             return True
-        elif "message to edit not found" in str(e).lower() or "message can't be edited" in str(e).lower():
+        elif "message to edit not found" in error_msg or "message can't be edited" in error_msg:
             # Сообщение не найдено или не может быть отредактировано
-            logger.warning(f"Не удалось отредактировать сообщение: {e}. Отправляем новое.")
+            logger.warning(f"⚠️ МЕНЮ: Не удалось отредактировать сообщение ID {message_id}: {e}")
+            logger.info(f"📨 МЕНЮ: Отправка нового сообщения в чат {chat_id}")
+
             try:
-                await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+                new_message = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+                logger.info(f"✅ МЕНЮ: Новое сообщение ID {new_message.message_id} отправлено")
             except Exception as send_error:
-                logger.error(f"Ошибка при отправке нового сообщения: {send_error}")
+                logger.error(f"❌ МЕНЮ: Ошибка при отправке нового сообщения: {send_error}")
             return False
         else:
-            logger.error(f"Неожиданная ошибка при редактировании: {e}")
+            logger.error(f"❌ МЕНЮ: Неожиданная ошибка при редактировании сообщения ID {message_id}: {e}")
             return False
     except Exception as e:
-        logger.error(f"Ошибка при редактировании сообщения: {e}")
+        logger.error(f"💥 МЕНЮ: Критическая ошибка при редактировании сообщения ID {message_id}: {e}")
         try:
-            await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+            logger.info(f"📨 МЕНЮ: Fallback - отправка нового сообщения в чат {chat_id}")
+            new_message = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+            logger.info(f"✅ МЕНЮ: Fallback сообщение ID {new_message.message_id} отправлено")
         except Exception as send_error:
-            logger.error(f"Ошибка при отправке fallback сообщения: {send_error}")
+            logger.error(f"❌ МЕНЮ: Критическая ошибка fallback отправки: {send_error}")
         return False
 
 
@@ -89,11 +108,16 @@ async def update_menu(bot: Bot, chat_id: int, user_id: int, message_id: int) -> 
     :param user_id: ID пользователя
     :param message_id: ID сообщения для редактирования
     """
-    config = await get_valid_config()
-    text = format_config_summary(config, user_id)
-    keyboard = config_action_keyboard(config.get("ACTIVE", False))
+    logger.info(f"🔄 МЕНЮ: Обновление главного меню для пользователя {user_id} (сообщение ID {message_id})")
 
     try:
+        config = await get_valid_config()
+        text = format_config_summary(config, user_id)
+        keyboard = config_action_keyboard(config.get("ACTIVE", False))
+
+        logger.debug(
+            f"🔄 МЕНЮ: Контент сформирован, система {'активна' if config.get('ACTIVE', False) else 'неактивна'}")
+
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
@@ -101,23 +125,41 @@ async def update_menu(bot: Bot, chat_id: int, user_id: int, message_id: int) -> 
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
+
+        logger.info(f"✅ МЕНЮ: Главное меню успешно обновлено (ID {message_id})")
+
     except TelegramBadRequest as e:
-        if "message is not modified" in str(e).lower():
+        error_msg = str(e).lower()
+
+        if "message is not modified" in error_msg:
             # Сообщение не изменилось, это нормально
-            pass
-        elif "message to edit not found" in str(e).lower() or "message can't be edited" in str(e).lower():
+            logger.debug(f"ℹ️ МЕНЮ: Содержимое главного меню не изменилось (ID {message_id})")
+        elif "message to edit not found" in error_msg or "message can't be edited" in error_msg:
             # Сообщение не найдено, отправляем новое
-            logger.warning(f"Сообщение для редактирования не найдено. Отправляем новое.")
-            await bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=keyboard,
-                disable_web_page_preview=True
-            )
+            logger.warning(f"⚠️ МЕНЮ: Сообщение ID {message_id} не найдено для редактирования")
+            logger.info(f"📨 МЕНЮ: Отправка нового главного меню в чат {chat_id}")
+
+            try:
+                config = await get_valid_config()
+                text = format_config_summary(config, user_id)
+                keyboard = config_action_keyboard(config.get("ACTIVE", False))
+
+                new_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True
+                )
+
+                logger.info(f"✅ МЕНЮ: Новое главное меню отправлено (ID {new_message.message_id})")
+
+            except Exception as send_error:
+                logger.error(f"❌ МЕНЮ: Ошибка отправки нового главного меню: {send_error}")
         else:
-            logger.error(f"Ошибка при обновлении меню: {e}")
+            logger.error(f"❌ МЕНЮ: Неожиданная ошибка обновления главного меню: {e}")
+
     except Exception as e:
-        logger.error(f"Неожиданная ошибка при обновлении меню: {e}")
+        logger.error(f"💥 МЕНЮ: Критическая ошибка обновления главного меню: {e}")
 
 
 async def send_main_menu(bot: Bot, chat_id: int, user_id: int) -> int:
@@ -129,14 +171,57 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int) -> int:
     :param user_id: ID пользователя
     :return: ID отправленного сообщения
     """
-    config = await get_valid_config()
-    text = format_config_summary(config, user_id)
-    keyboard = config_action_keyboard(config.get("ACTIVE", False))
+    logger.info(f"📨 МЕНЮ: Отправка главного меню для пользователя {user_id} в чат {chat_id}")
 
-    sent = await bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        reply_markup=keyboard,
-        disable_web_page_preview=True
-    )
-    return sent.message_id
+    try:
+        config = await get_valid_config()
+        text = format_config_summary(config, user_id)
+        keyboard = config_action_keyboard(config.get("ACTIVE", False))
+
+        # Подсчитываем статистику для логирования
+        targets = config.get("TARGETS", [])
+        enabled_targets = [t for t in targets if t.get("ENABLED", True)]
+        userbot_active = bool(config.get("USERBOT", {}).get("ENABLED", False))
+        system_active = config.get("ACTIVE", False)
+
+        logger.debug(
+            f"📊 МЕНЮ: Статистика - таргетов: {len(targets)}, активных: {len(enabled_targets)}, отправитель: {'✅' if userbot_active else '❌'}, система: {'🟢' if system_active else '🔴'}")
+
+        sent = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=keyboard,
+            disable_web_page_preview=True
+        )
+
+        logger.info(f"✅ МЕНЮ: Главное меню успешно отправлено (ID {sent.message_id})")
+        return sent.message_id
+
+    except Exception as e:
+        logger.error(f"❌ МЕНЮ: Ошибка отправки главного меню: {e}")
+
+        # Fallback - отправляем минимальное меню
+        try:
+            logger.info(f"🔄 МЕНЮ: Попытка отправки минимального меню")
+
+            fallback_text = ("⚠️ <b>Ошибка загрузки меню</b>\n\n"
+                             "Произошла ошибка при загрузке главного меню.\n"
+                             "Попробуйте перезапустить бот командой /start")
+
+            fallback_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Перезапуск", callback_data="main_menu")]
+            ])
+
+            sent = await bot.send_message(
+                chat_id=chat_id,
+                text=fallback_text,
+                reply_markup=fallback_keyboard,
+                disable_web_page_preview=True
+            )
+
+            logger.info(f"✅ МЕНЮ: Минимальное меню отправлено (ID {sent.message_id})")
+            return sent.message_id
+
+        except Exception as fallback_error:
+            logger.critical(f"💥 МЕНЮ: Критическая ошибка отправки минимального меню: {fallback_error}")
+            raise

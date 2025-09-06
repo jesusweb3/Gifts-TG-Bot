@@ -64,9 +64,9 @@ async def safe_delete_message(message: Message) -> None:
     """
     try:
         await message.delete()
-    except Exception:
-        # Игнорируем любые ошибки удаления (сообщение уже удалено, нет прав и т.д.)
-        pass
+        logger.debug(f"🗑️ СООБЩЕНИЯ: Удалено сообщение пользователя ID {message.message_id}")
+    except Exception as e:
+        logger.debug(f"🗑️ СООБЩЕНИЯ: Не удалось удалить сообщение ID {message.message_id}: {e}")
 
 
 async def try_cancel(message: Message, state: FSMContext) -> bool:
@@ -75,10 +75,13 @@ async def try_cancel(message: Message, state: FSMContext) -> bool:
     Если команда введена, очищает состояние FSM, удаляет сообщение пользователя и обновляет главное меню.
     """
     if message.text and message.text.strip().lower() == "/cancel":
+        logger.info(f"↩️ ОТМЕНА: Пользователь {message.from_user.id} отменил операцию через /cancel")
+
         # Удаляем сообщение пользователя
         await safe_delete_message(message)
 
         await state.clear()
+        logger.debug("🔄 ОТМЕНА: Состояние FSM очищено")
 
         # Возвращаемся в главное меню через обновление существующего сообщения
         await update_menu(
@@ -87,6 +90,7 @@ async def try_cancel(message: Message, state: FSMContext) -> bool:
             user_id=message.from_user.id,
             message_id=message.message_id
         )
+        logger.debug("🏠 ОТМЕНА: Возврат в главное меню")
         return True
     return False
 
@@ -97,9 +101,10 @@ async def safe_edit_text(message: Message, text: str, reply_markup: InlineKeyboa
     """
     try:
         await message.edit_text(text, reply_markup=reply_markup, disable_web_page_preview=True)
+        logger.debug(f"✅ СООБЩЕНИЯ: Сообщение ID {message.message_id} успешно отредактировано")
         return True
     except TelegramBadRequest as e:
-        logger.error(f"Ошибка редактирования сообщения: {e}")
+        logger.debug(f"⚠️ СООБЩЕНИЯ: Ошибка редактирования сообщения ID {message.message_id}: {e}")
         if "message can't be edited" in str(e) or "message to edit not found" in str(e):
             return False
         else:
@@ -123,13 +128,15 @@ async def edit_bot_message(message: Message, state: FSMContext, text: str,
                 reply_markup=reply_markup,
                 disable_web_page_preview=True
             )
+            logger.debug(f"✅ СООБЩЕНИЯ: Сообщение бота ID {bot_message_id} успешно отредактировано")
             return True
         except Exception as e:
-            logger.error(f"Не удалось отредактировать сообщение бота: {e}")
+            logger.warning(f"⚠️ СООБЩЕНИЯ: Не удалось отредактировать сообщение бота ID {bot_message_id}: {e}")
 
     # Fallback: отправляем новое сообщение
     new_msg = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
     await state.update_data(bot_message_id=new_msg.message_id)
+    logger.debug(f"📨 СООБЩЕНИЯ: Отправлено новое сообщение бота ID {new_msg.message_id}")
     return False
 
 
@@ -139,16 +146,22 @@ async def simple_get_chat_type(bot: Bot, username: str) -> str:
     """
     if not username.startswith("@"):
         username = "@" + username
+
+    logger.debug(f"🔍 ПРОВЕРКА: Определение типа чата для {username}")
+
     try:
         chat = await bot.get_chat(username)
         if chat.type == "private":
-            return "user" if not getattr(chat, "is_bot", False) else "bot"
+            chat_type = "user" if not getattr(chat, "is_bot", False) else "bot"
         elif chat.type == "channel":
-            return "channel"
+            chat_type = "channel"
         else:
-            return "group"
+            chat_type = "group"
+
+        logger.debug(f"✅ ПРОВЕРКА: Тип чата {username}: {chat_type}")
+        return chat_type
     except Exception as e:
-        logger.info(f"Не удалось получить информацию о чате {username}: {e}")
+        logger.debug(f"⚠️ ПРОВЕРКА: Не удалось определить тип чата {username}: {e}")
         return "unknown"
 
 
@@ -163,10 +176,13 @@ async def step_target_gift_id(message: Message, state: FSMContext):
         return
 
     if not message.text:
+        logger.debug(
+            f"⚠️ ТАРГЕТ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе Gift ID")
         await safe_delete_message(message)
         return
 
     gift_id_input = message.text.strip()
+    logger.info(f"🆔 ТАРГЕТ-МАСТЕР: Пользователь {message.from_user.id} ввел Gift ID: {gift_id_input}")
 
     # Удаляем сообщение пользователя после получения
     await safe_delete_message(message)
@@ -174,6 +190,8 @@ async def step_target_gift_id(message: Message, state: FSMContext):
     # Валидация ID подарка
     validated_gift_id = validate_gift_id(gift_id_input)
     if validated_gift_id is None:
+        logger.warning(f"❌ ТАРГЕТ-МАСТЕР: Невалидный Gift ID: {gift_id_input}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -186,6 +204,8 @@ async def step_target_gift_id(message: Message, state: FSMContext):
         await edit_bot_message(message, state, error_text, kb)
         return
 
+    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Gift ID валиден: {validated_gift_id}")
+
     # Проверяем доступность подарка
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
@@ -194,10 +214,14 @@ async def step_target_gift_id(message: Message, state: FSMContext):
     check_text = "🔍 <b>Проверка подарка...</b>\n\nПроверяю доступность подарка для перепродажи..."
     await edit_bot_message(message, state, check_text, kb)
 
+    logger.info(f"🔍 ТАРГЕТ-МАСТЕР: Проверка доступности подарка ID {validated_gift_id}")
+
     availability = await check_gift_availability(message.from_user.id, validated_gift_id)
 
     if not availability["available"]:
         error_msg = availability.get("error", "Подарки не найдены")
+        logger.warning(f"⚠️ ТАРГЕТ-МАСТЕР: Подарок ID {validated_gift_id} недоступен: {error_msg}")
+
         error_text = (f"⚠️ <b>Подарок недоступен</b>\n\n"
                       f"ID: <code>{validated_gift_id}</code>\n"
                       f"Ошибка: {error_msg}\n\n"
@@ -209,6 +233,8 @@ async def step_target_gift_id(message: Message, state: FSMContext):
     # Автоматически используем название подарка
     gift_name_found = availability.get("gift_name", "Unknown")
     total_found = availability["total_found"]
+
+    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Подарок найден - {gift_name_found}, доступно: {total_found:,} шт")
 
     await state.update_data(
         gift_id=validated_gift_id,
@@ -233,17 +259,23 @@ async def step_target_max_price(message: Message, state: FSMContext):
         return
 
     if not message.text:
+        logger.debug(f"⚠️ ТАРГЕТ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе цены")
         await safe_delete_message(message)
         return
+
+    price_input = message.text.strip()
+    logger.info(f"💰 ТАРГЕТ-МАСТЕР: Пользователь {message.from_user.id} ввел цену: {price_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
 
     try:
-        max_price = int(message.text.strip())
+        max_price = int(price_input)
         if max_price <= 0:
-            raise ValueError
-    except ValueError:
+            raise ValueError("Цена должна быть положительной")
+    except ValueError as e:
+        logger.warning(f"❌ ТАРГЕТ-МАСТЕР: Неверная цена '{price_input}': {e}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -256,6 +288,8 @@ async def step_target_max_price(message: Message, state: FSMContext):
 
     # Простая проверка разумности цены
     if max_price > 1000000:
+        logger.warning(f"⚠️ ТАРГЕТ-МАСТЕР: Слишком большая цена: {max_price}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -266,6 +300,8 @@ async def step_target_max_price(message: Message, state: FSMContext):
         await edit_bot_message(message, state, error_text, kb)
         return
 
+    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Цена валидна: ★{max_price:,}")
+
     data = await state.get_data()
     gift_id = data["gift_id"]
     gift_name = data["gift_name"]
@@ -274,6 +310,8 @@ async def step_target_max_price(message: Message, state: FSMContext):
     config = await get_valid_config()
     current_targets = config.get("TARGETS", [])
     if len(current_targets) >= 20:
+        logger.warning(f"⚠️ ТАРГЕТ-МАСТЕР: Достигнут лимит таргетов (20/20)")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -287,6 +325,8 @@ async def step_target_max_price(message: Message, state: FSMContext):
         return
 
     # Создаём таргет
+    logger.info(f"➕ ТАРГЕТ-МАСТЕР: Создание таргета - {gift_name} (ID: {gift_id}, цена: ★{max_price:,})")
+
     await add_target(config, str(gift_id), gift_name, max_price, save=True)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -299,6 +339,8 @@ async def step_target_max_price(message: Message, state: FSMContext):
                     f"🆔 ID: <code>{gift_id}</code>\n"
                     f"💰 Макс. цена: ★{max_price:,}\n\n"
                     f"Таргет добавлен в систему мониторинга.")
+
+    logger.info(f"✅ ТАРГЕТ-МАСТЕР: Таргет успешно создан - {gift_name}")
 
     await edit_bot_message(message, state, success_text, kb)
     await state.clear()
@@ -315,8 +357,13 @@ async def step_edit_target_price(message: Message, state: FSMContext):
         return
 
     if not message.text:
+        logger.debug(
+            f"⚠️ РЕДАКТИРОВАНИЕ: Пользователь {message.from_user.id} отправил пустое сообщение при редактировании цены")
         await safe_delete_message(message)
         return
+
+    price_input = message.text.strip()
+    logger.info(f"💰 РЕДАКТИРОВАНИЕ: Пользователь {message.from_user.id} ввел новую цену: {price_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -324,6 +371,8 @@ async def step_edit_target_price(message: Message, state: FSMContext):
     data = await state.get_data()
     idx = data.get("target_index")
     if idx is None:
+        logger.error("❌ РЕДАКТИРОВАНИЕ: Не найден индекс таргета в состоянии FSM")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -334,10 +383,12 @@ async def step_edit_target_price(message: Message, state: FSMContext):
         return
 
     try:
-        new_price = int(message.text.strip())
+        new_price = int(price_input)
         if new_price <= 0:
-            raise ValueError
-    except ValueError:
+            raise ValueError("Цена должна быть положительной")
+    except ValueError as e:
+        logger.warning(f"❌ РЕДАКТИРОВАНИЕ: Неверная цена '{price_input}': {e}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -350,6 +401,8 @@ async def step_edit_target_price(message: Message, state: FSMContext):
 
     # Простая проверка разумности цены
     if new_price > 1000000:
+        logger.warning(f"⚠️ РЕДАКТИРОВАНИЕ: Слишком большая цена: {new_price}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -363,6 +416,8 @@ async def step_edit_target_price(message: Message, state: FSMContext):
     config = await get_valid_config()
     targets = config.get("TARGETS", [])
     if idx >= len(targets):
+        logger.error(f"❌ РЕДАКТИРОВАНИЕ: Таргет #{idx} не найден (всего таргетов: {len(targets)})")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -378,6 +433,8 @@ async def step_edit_target_price(message: Message, state: FSMContext):
 
     # Обновляем цену таргета
     await update_target(config, idx, max_price=new_price, save=True)
+
+    logger.info(f"✅ РЕДАКТИРОВАНИЕ: Цена таргета #{idx} '{gift_name}' изменена: ★{old_price:,} → ★{new_price:,}")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎯 Таргеты", callback_data="targets_menu")],
@@ -404,25 +461,34 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
         return
 
     if not message.text:
+        logger.debug(
+            f"⚠️ ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} отправил пустое сообщение при вводе получателя")
         await safe_delete_message(message)
         return
 
     user_input = message.text.strip()
+    logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} ввел получателя: {user_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
 
     if user_input.startswith("@"):
+        logger.debug(f"🔍 ПОЛУЧАТЕЛЬ: Определение типа для username: {user_input}")
+
         chat_type = await simple_get_chat_type(bot=message.bot, username=user_input)
         if chat_type == "channel":
             target_chat_id = user_input
             target_user_id = None
             target_type = "channel"
+            logger.info(f"✅ ПОЛУЧАТЕЛЬ: Установлен канал: {user_input}")
         elif chat_type == "unknown":
             target_chat_id = user_input
             target_user_id = None
             target_type = "username"
+            logger.info(f"⚠️ ПОЛУЧАТЕЛЬ: Неизвестный тип, установлен как username: {user_input}")
         else:
+            logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неподдерживаемый тип чата '{chat_type}' для {user_input}")
+
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
             ])
@@ -437,7 +503,10 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
         target_chat_id = None
         target_user_id = int(user_input)
         target_type = "user_id"
+        logger.info(f"✅ ПОЛУЧАТЕЛЬ: Установлен User ID: {target_user_id}")
     else:
+        logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неверный формат получателя: {user_input}")
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -450,10 +519,16 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
 
     # Сохраняем новый получатель
     config = await get_valid_config()
+    old_user_id = config.get("TARGET_USER_ID")
+    old_chat_id = config.get("TARGET_CHAT_ID")
+
     config["TARGET_USER_ID"] = target_user_id
     config["TARGET_CHAT_ID"] = target_chat_id
     config["TARGET_TYPE"] = target_type
     await save_config(config)
+
+    logger.info(
+        f"✅ ПОЛУЧАТЕЛЬ: Получатель изменен - было: {old_user_id or old_chat_id}, стало: {target_user_id or target_chat_id}")
 
     # Формируем отображение получателя
     from services.config import get_target_display_local
@@ -475,3 +550,4 @@ def register_wizard_states_handlers(dp) -> None:
     Регистрирует все хендлеры FSM состояний.
     """
     dp.include_router(wizard_states_router)
+    logger.debug("📝 FSM: Обработчики FSM состояний зарегистрированы")
