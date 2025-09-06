@@ -54,13 +54,9 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
         logger.info(f"👤 MAIN: Команда /start от авторизованного пользователя {message.from_user.id}")
 
         await state.clear()
-        logger.debug("🔄 MAIN: Состояния FSM очищены")
-
-        logger.debug("💰 MAIN: Обновление баланса")
         await refresh_balance()
 
         # Отправляем главное меню (только при /start)
-        logger.info("📱 MAIN: Отправка главного меню")
         await send_main_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id)
 
     @dp.callback_query(F.data == "main_menu")
@@ -75,22 +71,20 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
-        logger.info(f"🏠 MAIN: Переход в главное меню от пользователя {call.from_user.id}")
-
         await state.clear()
         await call.answer()
 
-        logger.debug("💰 MAIN: Обновление баланса")
         await refresh_balance()
 
         # Обновляем меню в том же сообщении
-        logger.debug("📱 MAIN: Обновление главного меню")
         await update_menu(
             bot=call.bot,
             chat_id=call.message.chat.id,
             user_id=call.from_user.id,
             message_id=call.message.message_id
         )
+
+        logger.info(f"🏠 MAIN: Успешный переход в главное меню от пользователя {call.from_user.id}")
 
     @dp.callback_query(F.data == "recipient_menu")
     async def recipient_menu_callback(call: CallbackQuery) -> None:
@@ -104,7 +98,7 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
-        logger.info(f"📥 MAIN: Открытие меню получателя от пользователя {call.from_user.id}")
+        logger.info(f"📥 MAIN: Пользователь {call.from_user.id} перешёл по кнопке \"Получатель\"")
 
         config = await get_valid_config()
         target_display = get_target_display_local(
@@ -112,8 +106,6 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             config.get("TARGET_CHAT_ID"),
             call.from_user.id
         )
-
-        logger.debug(f"📥 MAIN: Текущий получатель: {target_display}")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Изменить получателя", callback_data="change_recipient")],
@@ -140,7 +132,7 @@ def register_main_handlers(dp: Dispatcher, bot: Bot, user_id: int) -> None:
             await call.answer("⛔️ Нет доступа", show_alert=True)
             return
 
-        logger.info(f"✏️ MAIN: Начало изменения получателя от пользователя {call.from_user.id}")
+        logger.info(f"✏️ MAIN: Пользователь {call.from_user.id} перешёл по кнопке \"Изменить получателя\"")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]

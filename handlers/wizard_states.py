@@ -467,7 +467,6 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
         return
 
     user_input = message.text.strip()
-    logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} ввел получателя: {user_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -480,12 +479,12 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
             target_chat_id = user_input
             target_user_id = None
             target_type = "channel"
-            logger.info(f"✅ ПОЛУЧАТЕЛЬ: Установлен канал: {user_input}")
+            logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил канал: {user_input}")
         elif chat_type == "unknown":
             target_chat_id = user_input
             target_user_id = None
             target_type = "username"
-            logger.info(f"⚠️ ПОЛУЧАТЕЛЬ: Неизвестный тип, установлен как username: {user_input}")
+            logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил username: {user_input}")
         else:
             logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неподдерживаемый тип чата '{chat_type}' для {user_input}")
 
@@ -503,7 +502,7 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
         target_chat_id = None
         target_user_id = int(user_input)
         target_type = "user_id"
-        logger.info(f"✅ ПОЛУЧАТЕЛЬ: Установлен User ID: {target_user_id}")
+        logger.info(f"📥 ПОЛУЧАТЕЛЬ: Пользователь {message.from_user.id} установил User ID: {target_user_id}")
     else:
         logger.warning(f"❌ ПОЛУЧАТЕЛЬ: Неверный формат получателя: {user_input}")
 
@@ -519,16 +518,10 @@ async def step_recipient_user_id(message: Message, state: FSMContext):
 
     # Сохраняем новый получатель
     config = await get_valid_config()
-    old_user_id = config.get("TARGET_USER_ID")
-    old_chat_id = config.get("TARGET_CHAT_ID")
-
     config["TARGET_USER_ID"] = target_user_id
     config["TARGET_CHAT_ID"] = target_chat_id
     config["TARGET_TYPE"] = target_type
     await save_config(config)
-
-    logger.info(
-        f"✅ ПОЛУЧАТЕЛЬ: Получатель изменен - было: {old_user_id or old_chat_id}, стало: {target_user_id or target_chat_id}")
 
     # Формируем отображение получателя
     from services.config import get_target_display_local

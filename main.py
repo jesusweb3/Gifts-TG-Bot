@@ -422,26 +422,16 @@ async def main() -> None:
     logger.info(f"🚀 STARTUP: Telegram Gifts Bot v{VERSION} - ЗАПУСК ПРИЛОЖЕНИЯ")
     logger.info("=" * 80)
 
-    # Проверяем учетные данные
-    logger.info(f"🔑 STARTUP: Проверка учетных данных")
-    logger.info(f"🤖 STARTUP: Токен бота: {'✅ Установлен' if TOKEN else '❌ Отсутствует'}")
-    logger.info(f"👤 STARTUP: ID пользователя: {USER_ID}")
-
     # Проверяем наличие параметра CONFIG_DATA
     env_config_data = get_env_variable("CONFIG_DATA", None)
     if env_config_data is not None:
-        logger.info("📄 STARTUP: Обнаружен CONFIG_DATA в переменных окружения")
-        logger.info("🔄 STARTUP: Обновление конфигурации из переменной окружения")
         await update_config_from_env(config_data=env_config_data)
-        logger.info("✅ STARTUP: Конфигурация успешно обновлена из переменной окружения")
 
     # Проверяем конфигурацию
-    logger.info("📋 STARTUP: Инициализация конфигурации")
     await ensure_config()
     logger.info("✅ STARTUP: Конфигурация готова")
 
     # Создаем бота
-    logger.info("🤖 STARTUP: Создание экземпляра Telegram бота")
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
     _bot_instance = bot  # Сохраняем ссылку для воркеров
@@ -450,8 +440,6 @@ async def main() -> None:
     # Получаем информацию о боте
     try:
         bot_info = await bot.get_me()
-        logger.info(f"🤖 STARTUP: Подключение к боту успешно: @{bot_info.username} (ID: {bot_info.id})")
-        logger.info(f"🤖 STARTUP: Имя бота: {bot_info.first_name}")
     except Exception as e:
         logger.error(f"❌ STARTUP: Ошибка подключения к боту: {e}")
         sys.exit(1)
@@ -460,48 +448,30 @@ async def main() -> None:
     def _loop_exception_handler(event_loop, context):
         exception = context.get("exception")
         if isinstance(exception, SecurityCheckMismatch):
-            logger.warning("⚠️ STARTUP: Pyrogram SecurityCheckMismatch - подробный traceback отключён")
             return
         event_loop.default_exception_handler(context)
 
     try:
         current_loop = asyncio.get_running_loop()
         current_loop.set_exception_handler(_loop_exception_handler)
-        logger.debug("🔧 STARTUP: Обработчик исключений для event loop установлен")
     except RuntimeError:
-        logger.debug("🔧 STARTUP: Нет запущенного event loop для установки обработчика исключений")
+        pass
 
     # Настройка логирования для сторонних библиотек
-    logging.getLogger("pyrogram").setLevel(logging.INFO)
-    logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)  # Убираем спам от aiogram
-    logging.getLogger("aiogram.event").setLevel(logging.WARNING)  # Убираем события aiogram
-    logger.debug("📝 STARTUP: Уровни логирования для сторонних библиотек настроены")
+    logging.getLogger("pyrogram").setLevel(logging.CRITICAL)
+    logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
     # Регистрируем модульные хендлеры
-    logger.info("🔗 STARTUP: Регистрация обработчиков событий")
     register_targets_handlers(dp)
-    logger.debug("✅ STARTUP: Обработчики таргетов зарегистрированы")
-
     register_sender_handlers(dp)
-    logger.debug("✅ STARTUP: Обработчики отправителя зарегистрированы")
-
     register_wizard_states_handlers(dp)
-    logger.debug("✅ STARTUP: Обработчики FSM состояний зарегистрированы")
-
     register_main_handlers(dp=dp, bot=bot, user_id=USER_ID)
-    logger.debug("✅ STARTUP: Основные обработчики зарегистрированы")
-
     logger.info("✅ STARTUP: Все обработчики событий зарегистрированы")
 
     # Запуск отправителя, если сессия уже существует
-    logger.info("📤 STARTUP: Проверка существующей сессии отправителя")
     bot_id = bot_info.id
     userbot_started = await try_start_userbot_from_config(USER_ID, bot_id)
-
-    if userbot_started:
-        logger.info("✅ STARTUP: Отправитель успешно запущен из существующей сессии")
-    else:
-        logger.info("ℹ️ STARTUP: Отправитель не настроен или сессия отсутствует")
 
     # Настройка стратегии повторных попыток подключения в случае ошибок
     backoff_config = BackoffConfig(
@@ -510,15 +480,9 @@ async def main() -> None:
         factor=2.0,
         jitter=0.2
     )
-    logger.debug("🔧 STARTUP: Настроена стратегия повторных попыток подключения")
 
-    # ВАЖНО: НЕ запускаем воркеры автоматически!
-    logger.info("ℹ️ STARTUP: Фоновые воркеры НЕ запущены - будут активированы при включении системы")
-
-    logger.info("=" * 80)
-    logger.info("🟢 STARTUP: ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА - БОТ ГОТОВ К РАБОТЕ")
     logger.info("🔄 STARTUP: Запуск polling для обработки событий Telegram")
-    logger.info("ℹ️ STARTUP: Для активации системы используйте кнопку 'Включить' в боте")
+    logger.info("🟢 STARTUP: ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА - БОТ ГОТОВ К РАБОТЕ")
     logger.info("=" * 80)
 
     try:

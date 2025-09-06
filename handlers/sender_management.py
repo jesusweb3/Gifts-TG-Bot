@@ -95,7 +95,7 @@ async def on_sender_menu(call: CallbackQuery):
     """
     Вызывает обновление меню отправителя после колбэка.
     """
-    logger.info(f"📤 ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} открыл меню отправителя")
+    logger.info(f"📤 SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Отправитель\"")
     await sender_menu(call.message, call.from_user.id)
     await call.answer()
 
@@ -193,7 +193,7 @@ async def on_sender_interval(call: CallbackQuery):
     """
     Открывает меню выбора интервала обновления отправителя.
     """
-    logger.info(f"⏳ ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} открыл настройки интервала")
+    logger.info(f"⏳ SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Интервал\"")
 
     config = await get_valid_config()
     current_interval = config.get("USERBOT", {}).get("UPDATE_INTERVAL", 45)
@@ -242,15 +242,12 @@ async def edit_sender_interval(call: CallbackQuery):
         await call.answer("🚫 Неверный интервал.", show_alert=True)
         return
 
-    logger.info(f"⏳ ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} изменил интервал на {interval} секунд")
+    logger.info(f"⏳ SENDER: Пользователь {call.from_user.id} установил интервал {interval} секунд")
 
     user_id = call.from_user.id
     config = await get_valid_config()
-    old_interval = config["USERBOT"]["UPDATE_INTERVAL"]
     config["USERBOT"]["UPDATE_INTERVAL"] = interval
     await save_config(config)
-
-    logger.info(f"✅ ОТПРАВИТЕЛЬ: Интервал изменен: {old_interval} → {interval} секунд")
 
     await call.answer(f"Интервал установлен: {interval} сек")
     await sender_menu(call.message, user_id, edit=True)
@@ -262,33 +259,14 @@ async def sender_enable_handler(call: CallbackQuery):
     Включает отправитель-сессию в конфигурации и обновляет меню.
     """
     user_id = call.from_user.id
-    username = call.from_user.username
 
-    logger.info(f"🔔 ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} включает отправитель")
+    logger.info(f"🔔 SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Включить\"")
 
-    bot_user = await call.bot.get_me()
-    bot_username = bot_user.username
     config = await get_valid_config()
     config["USERBOT"]["ENABLED"] = True
     await save_config(config)
 
     await call.answer("Отправитель включён")
-
-    text_message = (
-        f"🔔 <b>Отправитель включён.</b>\n\n"
-        f"┌🤖 <b>Бот:</b> @{bot_username}\n"
-        f"├👤 <b>Пользователь:</b> @{username} (<code>{user_id}</code>)\n"
-        f"└🕒 <b>Время:</b> {now_str()} (UTC)"
-    )
-
-    logger.debug("📨 ОТПРАВИТЕЛЬ: Отправка уведомления о включении в 'Избранное'")
-    success_send_message = await userbot_send_self(user_id, text_message)
-
-    if success_send_message:
-        logger.info("✅ ОТПРАВИТЕЛЬ: Уведомление о включении успешно отправлено")
-    else:
-        logger.warning("⚠️ ОТПРАВИТЕЛЬ: Не удалось отправить уведомление о включении")
-
     await sender_menu(call.message, user_id, edit=True)
 
 
@@ -298,33 +276,14 @@ async def sender_disable_handler(call: CallbackQuery):
     Отключает отправитель-сессию в конфигурации и обновляет меню.
     """
     user_id = call.from_user.id
-    username = call.from_user.username
 
-    logger.info(f"🔕 ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} отключает отправитель")
+    logger.info(f"🔕 SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Выключить\"")
 
-    bot_user = await call.bot.get_me()
-    bot_username = bot_user.username
     config = await get_valid_config()
     config["USERBOT"]["ENABLED"] = False
     await save_config(config)
 
     await call.answer("Отправитель выключен")
-
-    text_message = (
-        f"🔕 <b>Отправитель выключен.</b>\n\n"
-        f"┌🤖 <b>Бот:</b> @{bot_username}\n"
-        f"├👤 <b>Пользователь:</b> @{username} (<code>{user_id}</code>)\n"
-        f"└🕒 <b>Время:</b> {now_str()} (UTC)"
-    )
-
-    logger.debug("📨 ОТПРАВИТЕЛЬ: Отправка уведомления о выключении в 'Избранное'")
-    success_send_message = await userbot_send_self(user_id, text_message)
-
-    if success_send_message:
-        logger.info("✅ ОТПРАВИТЕЛЬ: Уведомление о выключении успешно отправлено")
-    else:
-        logger.warning("⚠️ ОТПРАВИТЕЛЬ: Не удалось отправить уведомление о выключении")
-
     await sender_menu(call.message, user_id, edit=True)
 
 
@@ -333,7 +292,7 @@ async def confirm_sender_delete(call: CallbackQuery):
     """
     Запрашивает подтверждение удаления отправитель-сессии у пользователя.
     """
-    logger.info(f"🗑️ ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} запрашивает удаление отправителя")
+    logger.info(f"🗑️ SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Удалить\"")
 
     config = await get_valid_config()
     sender = config.get("USERBOT", {})
@@ -362,7 +321,7 @@ async def cancel_sender_delete(call: CallbackQuery):
     """
     Отменяет процесс удаления отправитель-сессии и возвращает в меню.
     """
-    logger.info(f"↩️ ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} отменил удаление отправителя")
+    logger.info(f"↩️ SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Нет\"")
 
     user_id = call.from_user.id
     await call.answer("Отменено.")
@@ -376,7 +335,7 @@ async def sender_delete_handler(call: CallbackQuery):
     """
     user_id = call.from_user.id
 
-    logger.info(f"🗑️ ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} подтверждает удаление отправителя")
+    logger.info(f"🗑️ SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Да\"")
 
     config = await get_valid_config()
     sender = config.get("USERBOT", {})
@@ -419,7 +378,7 @@ async def init_sender_handler(call: CallbackQuery, state: FSMContext):
     """
     Запускает процесс подключения новой отправитель-сессии (шаг ввода api_id).
     """
-    logger.info(f"🔐 ОТПРАВИТЕЛЬ: Пользователь {call.from_user.id} начинает подключение отправителя")
+    logger.info(f"🔐 SENDER: Пользователь {call.from_user.id} перешёл по кнопке \"Подключить отправитель\"")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
@@ -446,13 +405,10 @@ async def get_api_id(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        logger.debug(
-            f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе API_ID")
         await safe_delete_message(message)
         return
 
     api_id_input = message.text.strip()
-    logger.info(f"🔑 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел API_ID: {api_id_input}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -473,7 +429,7 @@ async def get_api_id(message: Message, state: FSMContext):
     value = int(api_id_input)
     await state.update_data(api_id=value)
 
-    logger.info(f"✅ ОТПРАВИТЕЛЬ-МАСТЕР: API_ID валиден: {value}")
+    logger.info(f"🔑 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел валидный API_ID: {value}")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
@@ -497,13 +453,10 @@ async def get_api_hash(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        logger.debug(
-            f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе API_HASH")
         await safe_delete_message(message)
         return
 
     api_hash = message.text.strip()
-    logger.info(f"🔑 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел API_HASH: {api_hash[:8]}...")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -523,7 +476,7 @@ async def get_api_hash(message: Message, state: FSMContext):
 
     await state.update_data(api_hash=api_hash)
 
-    logger.info(f"✅ ОТПРАВИТЕЛЬ-МАСТЕР: API_HASH валиден")
+    logger.info(f"🔑 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел валидный API_HASH: {api_hash[:8]}...")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
@@ -547,15 +500,11 @@ async def get_phone(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        logger.debug(
-            f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе телефона")
         await safe_delete_message(message)
         return
 
     raw_phone = message.text.strip()
     phone = raw_phone.replace(" ", "")
-
-    logger.info(f"📱 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел телефон: {phone}")
 
     # Удаляем сообщение пользователя
     await safe_delete_message(message)
@@ -575,9 +524,8 @@ async def get_phone(message: Message, state: FSMContext):
 
     await state.update_data(phone=phone)
 
-    logger.info(f"✅ ОТПРАВИТЕЛЬ-МАСТЕР: Номер телефона валиден: {phone}")
+    logger.info(f"📱 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} ввел валидный телефон: {phone}")
 
-    logger.info(f"📨 ОТПРАВИТЕЛЬ-МАСТЕР: Инициация отправки кода подтверждения на {phone}")
     success = await start_userbot(message, state)
     if not success:
         logger.error("❌ ОТПРАВИТЕЛЬ-МАСТЕР: Не удалось отправить код подтверждения")
@@ -607,8 +555,6 @@ async def on_code_digit(call: CallbackQuery, state: FSMContext):
     current_code = data.get("current_code", "") + digit
     await state.update_data(current_code=current_code)
 
-    logger.debug(f"🔢 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {call.from_user.id} ввел цифру {digit}, код: {current_code}")
-
     await call.answer()
 
     text = (f"📱 <b>Код подтверждения</b>\n\n"
@@ -630,8 +576,6 @@ async def on_code_delete(call: CallbackQuery, state: FSMContext):
     current_code = old_code[:-1]
     await state.update_data(current_code=current_code)
 
-    logger.debug(f"⬅️ ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {call.from_user.id} удалил цифру: {old_code} → {current_code}")
-
     await call.answer()
 
     text = (f"📱 <b>Код подтверждения</b>\n\n"
@@ -651,10 +595,9 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current_code = data.get("current_code", "")
 
-    logger.info(f"🔐 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {call.from_user.id} подтверждает код: {current_code}")
+    logger.info(f"🔐 ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {call.from_user.id} отправляет код: {current_code}")
 
     if not (4 <= len(current_code) <= 6):
-        logger.warning(f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Неверная длина кода: {len(current_code)}")
         await call.answer("🚫 Код должен быть от 4 до 6 символов. Попробуйте ещё раз.", show_alert=True)
         return
 
@@ -666,13 +609,9 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
 
     await state.update_data(code=current_code)
 
-    logger.info(f"🔍 ОТПРАВИТЕЛЬ-МАСТЕР: Проверка кода {current_code}")
-
     success, need_password, retry = await continue_userbot_signin(call, state)
 
     if retry:
-        logger.warning(f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Неверный код {current_code}, повтор")
-
         await state.set_state(ConfigWizard.userbot_code)
         await state.update_data(current_code="")
 
@@ -686,8 +625,6 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
         return
 
     if not success:
-        logger.error(f"❌ ОТПРАВИТЕЛЬ-МАСТЕР: Авторизация не удалась")
-
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -701,8 +638,6 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
         return
 
     if need_password:
-        logger.info(f"🔐 ОТПРАВИТЕЛЬ-МАСТЕР: Требуется облачный пароль")
-
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -714,7 +649,6 @@ async def on_code_enter(call: CallbackQuery, state: FSMContext):
         await safe_edit_menu(call.message, password_text, kb)
         await state.set_state(ConfigWizard.userbot_password)
     else:
-        logger.info(f"✅ ОТПРАВИТЕЛЬ-МАСТЕР: Авторизация завершена успешно")
         await sender_success_message(call, state)
 
     await call.answer()
@@ -729,8 +663,6 @@ async def get_password(message: Message, state: FSMContext):
         return
 
     if not message.text:
-        logger.debug(
-            f"⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Пользователь {message.from_user.id} отправил пустое сообщение при вводе пароля")
         await safe_delete_message(message)
         return
 
@@ -741,19 +673,14 @@ async def get_password(message: Message, state: FSMContext):
 
     await state.update_data(password=message.text.strip())
 
-    logger.info(f"🔍 ОТПРАВИТЕЛЬ-МАСТЕР: Проверка облачного пароля")
-
     success, retry = await finish_userbot_signin(message, state)
 
     if retry:
         return
 
     if success:
-        logger.info(f"✅ ОТПРАВИТЕЛЬ-МАСТЕР: Авторизация с паролем завершена успешно")
         await sender_success_message_text(message, state)
     else:
-        logger.error(f"❌ ОТПРАВИТЕЛЬ-МАСТЕР: Неверный облачный пароль")
-
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
         ])
@@ -770,47 +697,13 @@ async def sender_success_message(call: CallbackQuery, state: FSMContext):
     """
     Отправляет сообщение об успешном подключении отправителя через CallbackQuery.
     """
-    user_id = call.from_user.id
-    username = call.from_user.username
-
-    logger.info(f"🎉 ОТПРАВИТЕЛЬ-МАСТЕР: Подготовка сообщения об успешном подключении для пользователя {user_id}")
-
-    bot_user = await call.bot.get_me()
-    bot_username = bot_user.username
-
-    config = await get_valid_config()
-    config_id = config["USERBOT"].get("CONFIG_ID")
-    from services.config import DEVICE_MODELS, SYSTEM_VERSIONS, APP_VERSIONS
-    device_model = DEVICE_MODELS[config_id] if config_id is not None else "Unknown"
-    system_version = SYSTEM_VERSIONS[config_id] if config_id is not None else "Unknown"
-    app_version = APP_VERSIONS[config_id] if config_id is not None else "Unknown"
-
-    text_success_message = (
-        f"✅ <b>Отправитель-сессия успешно авторизована через Telegram-бота.</b>\n\n"
-        f"┌🤖 <b>Бот:</b> @{bot_username}\n"
-        f"├👤 <b>Пользователь:</b> @{username} (<code>{user_id}</code>)\n"
-        f"├📱 <b>Модель устройства:</b> {device_model}\n"
-        f"├🖥️ <b>Версия системы:</b> {system_version}\n"
-        f"└📱 <b>Версия приложения:</b> {app_version}\n"
-    )
-
-    logger.debug("📨 ОТПРАВИТЕЛЬ-МАСТЕР: Отправка уведомления об успешном подключении в 'Избранное'")
-    success_send_message = await userbot_send_self(user_id, text_success_message)
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu")],
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
     ])
 
-    if success_send_message:
-        logger.info("✅ ОТПРАВИТЕЛЬ-МАСТЕР: Уведомление об успешном подключении отправлено")
-        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
-                        "Отправитель успешно подключён и готов к работе.")
-    else:
-        logger.warning("⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Не удалось отправить уведомление об успешном подключении")
-        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
-                        "Отправитель успешно подключён.\n"
-                        "🚫 Ошибка при отправке подтверждения.")
+    success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                    "Отправитель успешно подключён и готов к работе.")
 
     await safe_edit_menu(call.message, success_text, kb)
     await state.clear()
@@ -820,47 +713,13 @@ async def sender_success_message_text(message: Message, state: FSMContext):
     """
     Отправляет сообщение об успешном подключении отправителя через Message.
     """
-    user_id = message.from_user.id
-    username = message.from_user.username
-
-    logger.info(f"🎉 ОТПРАВИТЕЛЬ-МАСТЕР: Подготовка сообщения об успешном подключении для пользователя {user_id}")
-
-    bot_user = await message.bot.get_me()
-    bot_username = bot_user.username
-
-    config = await get_valid_config()
-    config_id = config["USERBOT"].get("CONFIG_ID")
-    from services.config import DEVICE_MODELS, SYSTEM_VERSIONS, APP_VERSIONS
-    device_model = DEVICE_MODELS[config_id] if config_id is not None else "Unknown"
-    system_version = SYSTEM_VERSIONS[config_id] if config_id is not None else "Unknown"
-    app_version = APP_VERSIONS[config_id] if config_id is not None else "Unknown"
-
-    text_success_message = (
-        f"✅ <b>Отправитель-сессия успешно авторизована через Telegram-бота.</b>\n\n"
-        f"┌🤖 <b>Бот:</b> @{bot_username}\n"
-        f"├👤 <b>Пользователь:</b> @{username} (<code>{user_id}</code>)\n"
-        f"├📱 <b>Модель устройства:</b> {device_model}\n"
-        f"├🖥️ <b>Версия системы:</b> {system_version}\n"
-        f"└📱 <b>Версия приложения:</b> {app_version}\n"
-    )
-
-    logger.debug("📨 ОТПРАВИТЕЛЬ-МАСТЕР: Отправка уведомления об успешном подключении в 'Избранное'")
-    success_send_message = await userbot_send_self(user_id, text_success_message)
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Отправитель", callback_data="sender_menu")],
         [InlineKeyboardButton(text="☰ Меню", callback_data="main_menu")]
     ])
 
-    if success_send_message:
-        logger.info("✅ ОТПРАВИТЕЛЬ-МАСТЕР: Уведомление об успешном подключении отправлено")
-        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
-                        "Отправитель успешно подключён и готов к работе.")
-    else:
-        logger.warning("⚠️ ОТПРАВИТЕЛЬ-МАСТЕР: Не удалось отправить уведомление об успешном подключении")
-        success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
-                        "Отправитель успешно подключён.\n"
-                        "🚫 Ошибка при отправке подтверждения.")
+    success_text = ("✅ <b>Отправитель подключён!</b>\n\n"
+                    "Отправитель успешно подключён и готов к работе.")
 
     await edit_bot_message(message, state, success_text, kb)
     await state.clear()

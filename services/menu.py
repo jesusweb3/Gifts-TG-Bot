@@ -77,7 +77,6 @@ async def safe_edit_menu(message: Message, text: str, reply_markup: InlineKeyboa
         elif "message to edit not found" in error_msg or "message can't be edited" in error_msg:
             # Сообщение не найдено или не может быть отредактировано
             logger.warning(f"⚠️ МЕНЮ: Не удалось отредактировать сообщение ID {message_id}: {e}")
-            logger.info(f"📨 МЕНЮ: Отправка нового сообщения в чат {chat_id}")
 
             try:
                 new_message = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
@@ -91,7 +90,6 @@ async def safe_edit_menu(message: Message, text: str, reply_markup: InlineKeyboa
     except Exception as e:
         logger.error(f"💥 МЕНЮ: Критическая ошибка при редактировании сообщения ID {message_id}: {e}")
         try:
-            logger.info(f"📨 МЕНЮ: Fallback - отправка нового сообщения в чат {chat_id}")
             new_message = await message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
             logger.info(f"✅ МЕНЮ: Fallback сообщение ID {new_message.message_id} отправлено")
         except Exception as send_error:
@@ -108,15 +106,10 @@ async def update_menu(bot: Bot, chat_id: int, user_id: int, message_id: int) -> 
     :param user_id: ID пользователя
     :param message_id: ID сообщения для редактирования
     """
-    logger.info(f"🔄 МЕНЮ: Обновление главного меню для пользователя {user_id} (сообщение ID {message_id})")
-
     try:
         config = await get_valid_config()
         text = format_config_summary(config, user_id)
         keyboard = config_action_keyboard(config.get("ACTIVE", False))
-
-        logger.debug(
-            f"🔄 МЕНЮ: Контент сформирован, система {'активна' if config.get('ACTIVE', False) else 'неактивна'}")
 
         await bot.edit_message_text(
             chat_id=chat_id,
@@ -125,8 +118,6 @@ async def update_menu(bot: Bot, chat_id: int, user_id: int, message_id: int) -> 
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
-
-        logger.info(f"✅ МЕНЮ: Главное меню успешно обновлено (ID {message_id})")
 
     except TelegramBadRequest as e:
         error_msg = str(e).lower()
@@ -137,7 +128,6 @@ async def update_menu(bot: Bot, chat_id: int, user_id: int, message_id: int) -> 
         elif "message to edit not found" in error_msg or "message can't be edited" in error_msg:
             # Сообщение не найдено, отправляем новое
             logger.warning(f"⚠️ МЕНЮ: Сообщение ID {message_id} не найдено для редактирования")
-            logger.info(f"📨 МЕНЮ: Отправка нового главного меню в чат {chat_id}")
 
             try:
                 config = await get_valid_config()
@@ -171,21 +161,10 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int) -> int:
     :param user_id: ID пользователя
     :return: ID отправленного сообщения
     """
-    logger.info(f"📨 МЕНЮ: Отправка главного меню для пользователя {user_id} в чат {chat_id}")
-
     try:
         config = await get_valid_config()
         text = format_config_summary(config, user_id)
         keyboard = config_action_keyboard(config.get("ACTIVE", False))
-
-        # Подсчитываем статистику для логирования
-        targets = config.get("TARGETS", [])
-        enabled_targets = [t for t in targets if t.get("ENABLED", True)]
-        userbot_active = bool(config.get("USERBOT", {}).get("ENABLED", False))
-        system_active = config.get("ACTIVE", False)
-
-        logger.debug(
-            f"📊 МЕНЮ: Статистика - таргетов: {len(targets)}, активных: {len(enabled_targets)}, отправитель: {'✅' if userbot_active else '❌'}, система: {'🟢' if system_active else '🔴'}")
 
         sent = await bot.send_message(
             chat_id=chat_id,
@@ -202,8 +181,6 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int) -> int:
 
         # Fallback - отправляем минимальное меню
         try:
-            logger.info(f"🔄 МЕНЮ: Попытка отправки минимального меню")
-
             fallback_text = ("⚠️ <b>Ошибка загрузки меню</b>\n\n"
                              "Произошла ошибка при загрузке главного меню.\n"
                              "Попробуйте перезапустить бот командой /start")

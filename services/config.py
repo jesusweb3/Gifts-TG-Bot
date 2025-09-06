@@ -27,7 +27,7 @@ import aiofiles
 
 logger = logging.getLogger(__name__)
 
-VERSION = '2.0.0'  # Версия приложения (система таргетов)
+VERSION = '1.0.0'  # Версия приложения (система таргетов)
 CONFIG_PATH = "config.json"  # Путь к файлу конфигурации
 MORE_LOGS = False  # Логировать больше информации в консоль
 PURCHASE_COOLDOWN = 0.3  # Количество покупок в секунду
@@ -86,7 +86,6 @@ async def ensure_config(path: str = CONFIG_PATH):
     if not os.path.exists(path):
         async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
             await f.write(json.dumps(default_config(), indent=2))
-        logger.info(f"Создана конфигурация: {path}")
 
 
 async def load_config(path: str = CONFIG_PATH) -> dict:
@@ -110,7 +109,6 @@ async def save_config(config: dict, path: str = CONFIG_PATH):
     """
     async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
         await f.write(json.dumps(config, indent=2))
-    logger.info(f"Конфигурация сохранена.")
 
 
 def simple_validate_config(config: dict) -> dict:
